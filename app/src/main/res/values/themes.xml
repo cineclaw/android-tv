@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.CineClawTV" parent="android:Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">#07090E</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>
