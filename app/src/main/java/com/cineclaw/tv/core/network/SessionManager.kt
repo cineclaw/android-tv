@@ -21,7 +21,7 @@ class SessionManager(private val context: Context) {
     }
 
     val serverUrl: Flow<String> = context.dataStore.data.map {
-        it[KEY_SERVER_URL] ?: "http://192.168.88.126:3000"
+        it[KEY_SERVER_URL] ?: "http://192.168.88.19:3000"
     }
 
     val authToken: Flow<String?> = context.dataStore.data.map {
@@ -44,8 +44,12 @@ class SessionManager(private val context: Context) {
     suspend fun getAuthTokenSync(): String? = authToken.first()
 
     suspend fun saveServerUrl(url: String) {
-        val cleanUrl = url.trim().trimEnd('/')
-        context.dataStore.edit { it[KEY_SERVER_URL] = cleanUrl }
+        var clean = url.trim()
+        if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+            clean = "http://$clean"
+        }
+        clean = clean.trimEnd('/')
+        context.dataStore.edit { it[KEY_SERVER_URL] = clean }
     }
 
     suspend fun saveSession(token: String, user: String) {

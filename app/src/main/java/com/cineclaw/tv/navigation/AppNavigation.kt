@@ -115,25 +115,27 @@ fun AppNavigation(
     val app = CineClawApp.instance
     val scope = rememberCoroutineScope()
 
-    var isAuthenticated by remember { mutableStateOf<Boolean?>(null) }
-    var serverUrl by remember { mutableStateOf("http://192.168.88.126:3000") }
-    var isAudioPassthrough by remember { mutableStateOf(false) }
-    var preferredQuality by remember { mutableStateOf("4k") }
+    val currentServerUrl by app.sessionManager.serverUrl.collectAsState(initial = "http://192.168.88.19:3000")
+    val currentUsername by app.sessionManager.username.collectAsState(initial = null)
+    val isAudioPassthrough by app.sessionManager.audioPassthrough.collectAsState(initial = false)
+    val preferredQuality by app.sessionManager.preferredQuality.collectAsState(initial = "4k")
+    val serverUrl = currentServerUrl
+
+    var hasCheckedAuth by remember { mutableStateOf(false) }
+    var initialIsAuthenticated by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val token = app.sessionManager.authToken.first()
-        serverUrl = app.sessionManager.serverUrl.first()
-        isAudioPassthrough = app.sessionManager.audioPassthrough.first()
-        preferredQuality = app.sessionManager.preferredQuality.first()
-        isAuthenticated = !token.isNullOrBlank()
+        initialIsAuthenticated = !token.isNullOrBlank()
+        hasCheckedAuth = true
     }
 
-    if (isAuthenticated == null) {
+    if (!hasCheckedAuth) {
         // Initial splash loading
         return
     }
 
-    val startDestination = if (isAuthenticated == true) Screen.Home.route else Screen.Auth.route
+    val startDestination = if (initialIsAuthenticated) Screen.Home.route else Screen.Auth.route
 
     NavHost(
         navController = navController,
@@ -144,16 +146,23 @@ fun AppNavigation(
         popExitTransition = { fadeOut(animationSpec = tween(150)) }
     ) {
         composable(Screen.Auth.route) {
+            var authError by remember { mutableStateOf<String?>(null) }
+            var isLoggingIn by remember { mutableStateOf(false) }
+
             AuthScreen(
-                currentServerUrl = serverUrl,
+                currentServerUrl = currentServerUrl,
                 onConnectManual = { url, username, password ->
                     scope.launch {
-                        app.sessionManager.saveServerUrl(url)
-                        val success = app.apiClient.login(username, password)
+                        isLoggingIn = true
+                        authError = null
+                        val (success, errorMsg) = app.apiClient.loginWithResult(username, password, url)
+                        isLoggingIn = false
                         if (success) {
                             navController.navigate(Screen.Home.route) {
                                 popUpTo(Screen.Auth.route) { inclusive = true }
                             }
+                        } else {
+                            authError = errorMsg ?: "Не удалось войти"
                         }
                     }
                 },
@@ -161,6 +170,15 @@ fun AppNavigation(
                     navController.navigate(Screen.Home.route) {
                         popUpTo(Screen.Auth.route) { inclusive = true }
                     }
+                },
+                errorMessage = authError,
+                isLoggingIn = isLoggingIn,
+                onCheckPing = { url ->
+                    app.apiClient.pingServer(url)
+                },
+                onPollPairing = { code ->
+                    val resp = app.apiClient.checkPairingStatus(code)
+                    resp?.paired == true
                 }
             )
         }
@@ -972,24 +990,22 @@ fun AppNavigation(
 
         composable(Screen.Settings.route) {
             SettingsScreen(
-                currentServerUrl = serverUrl,
+                currentServerUrl = currentServerUrl,
+                currentUsername = currentUsername ?: "admin",
                 isAudioPassthrough = isAudioPassthrough,
                 preferredQuality = preferredQuality,
                 onSaveServerUrl = { newUrl ->
                     scope.launch {
-                        serverUrl = newUrl
                         app.sessionManager.saveServerUrl(newUrl)
                     }
                 },
                 onToggleAudioPassthrough = { enabled ->
                     scope.launch {
-                        isAudioPassthrough = enabled
                         app.sessionManager.setAudioPassthrough(enabled)
                     }
                 },
                 onSetPreferredQuality = { quality ->
                     scope.launch {
-                        preferredQuality = quality
                         app.sessionManager.setPreferredQuality(quality)
                     }
                 },
@@ -997,9 +1013,20 @@ fun AppNavigation(
                     scope.launch {
                         app.sessionManager.clearSession()
                         navController.navigate(Screen.Auth.route) {
-                            popUpTo(Screen.Home.route) { inclusive = true }
+                            popUpTo(0) { inclusive = true }
                         }
                     }
+                },
+                onChangeServer = {
+                    scope.launch {
+                        app.sessionManager.clearSession()
+                        navController.navigate(Screen.Auth.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                },
+                onPingCheck = { url ->
+                    app.apiClient.pingServer(url)
                 }
             )
         }

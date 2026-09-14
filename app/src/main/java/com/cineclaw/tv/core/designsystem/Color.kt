@@ -8,6 +8,12 @@ val ObsidianSurface = Color(0xFF0D111A)
 val ObsidianSurfaceVariant = Color(0xFF151B28)
 val ObsidianBorder = Color(0x1FFFFFFF)
 
+// Aliases
+val ObsidianCard = ObsidianSurface
+val ObsidianElevated = ObsidianSurfaceVariant
+val ObsidianBase = ObsidianBackground
+val BorderColor = ObsidianBorder
+
 // Accent Colors
 val EmeraldPrimary = Color(0xFF10B981)
 val EmeraldGlow = Color(0x4010B981)

@@ -47,20 +47,65 @@ class ApiClient(private val sessionManager: SessionManager) {
             .create(CineClawApi::class.java)
     }
 
-    suspend fun login(username: String, password: String): Boolean {
-        return try {
-            val resp = getApi().login(com.cineclaw.tv.core.model.LoginRequest(username = username, password = password))
-            if (resp.success && !resp.token.isNullOrBlank()) {
-                sessionManager.saveSession(resp.token, resp.username ?: username)
-                true
-            } else {
-                false
+    suspend fun pingServer(targetUrl: String? = null): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val raw = (targetUrl ?: sessionManager.getServerUrlSync()).trim()
+        var url = if (!raw.startsWith("http://") && !raw.startsWith("https://")) "http://$raw" else raw
+        url = url.trimEnd('/')
+        try {
+            val req = okhttp3.Request.Builder()
+                .url(url)
+                .head()
+                .build()
+            val client = okHttpClient.newBuilder()
+                .connectTimeout(3, TimeUnit.SECONDS)
+                .readTimeout(3, TimeUnit.SECONDS)
+                .build()
+            client.newCall(req).execute().use { resp ->
+                resp.code in 200..401
             }
         } catch (e: Exception) {
-            android.util.Log.e("CineClaw", "Login failed: ${e.message}", e)
             false
         }
     }
+
+    suspend fun loginWithResult(username: String, password: String, targetUrl: String? = null): Pair<Boolean, String?> =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                if (!targetUrl.isNullOrBlank()) {
+                    sessionManager.saveServerUrl(targetUrl)
+                }
+                val resp = getApi().login(com.cineclaw.tv.core.model.LoginRequest(username = username, password = password))
+                if (resp.success && !resp.token.isNullOrBlank()) {
+                    sessionManager.saveSession(resp.token, resp.username ?: username)
+                    Pair(true, null)
+                } else {
+                    Pair(false, "Неверный логин или пароль")
+                }
+            } catch (e: retrofit2.HttpException) {
+                val msg = if (e.code() == 401) "Неверный логин или пароль" else "Ошибка сервера (HTTP ${e.code()})"
+                Pair(false, msg)
+            } catch (e: Exception) {
+                android.util.Log.e("CineClaw", "Login failed: ${e.message}", e)
+                Pair(false, "Не удалось подключиться: ${e.localizedMessage ?: "сервер недоступен"}")
+            }
+        }
+
+    suspend fun login(username: String, password: String): Boolean {
+        return loginWithResult(username, password).first
+    }
+
+    suspend fun checkPairingStatus(code: String): com.cineclaw.tv.core.model.PairingStatusResponse? =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val resp = getApi().checkPairingStatus(code)
+                if (resp.paired && !resp.token.isNullOrBlank()) {
+                    sessionManager.saveSession(resp.token, resp.username ?: "admin")
+                }
+                resp
+            } catch (e: Exception) {
+                null
+            }
+        }
 
     fun getDirectOkHttpClient(): OkHttpClient = okHttpClient.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS)

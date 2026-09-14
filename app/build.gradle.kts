@@ -61,6 +61,32 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
+    }
+
+    flavorDimensions += "target"
+    productFlavors {
+        create("tv") {
+            dimension = "target"
+            applicationId = "com.cineclaw.tv"
+            versionNameSuffix = "-tv"
+            buildConfigField("boolean", "IS_AUTOMOTIVE", "false")
+            buildConfigField("int", "BUFFER_MAX_MS", "45000")
+            buildConfigField("int", "BUFFER_MIN_MS", "15000")
+            buildConfigField("String", "DEFAULT_STREAM_PROFILE", "\"direct\"")
+        }
+        create("auto") {
+            dimension = "target"
+            applicationId = "com.cineclaw.auto"
+            versionNameSuffix = "-auto"
+            buildConfigField("boolean", "IS_AUTOMOTIVE", "true")
+            buildConfigField("int", "BUFFER_MAX_MS", "180000")
+            buildConfigField("int", "BUFFER_MIN_MS", "30000")
+            buildConfigField("String", "DEFAULT_STREAM_PROFILE", "\"720p\"")
+            ndk {
+                abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
+            }
+        }
     }
 
     packaging {

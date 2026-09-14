@@ -29,6 +29,8 @@ import androidx.media3.extractor.ExtractorOutput
 import androidx.media3.extractor.ExtractorsFactory
 import androidx.media3.extractor.PositionHolder
 import androidx.media3.extractor.mkv.MatroskaExtractor
+import com.cineclaw.tv.BuildConfig
+import androidx.media3.ui.AspectRatioFrameLayout
 import com.cineclaw.tv.core.model.AudioTrack
 import com.cineclaw.tv.core.model.SubtitleTrack
 import com.cineclaw.tv.core.network.ApiClient
@@ -45,6 +47,10 @@ data class PlayerUiState(
     val isBuffering: Boolean = false,
     val isSwitchingQuality: Boolean = false,
     val currentQualityTier: String = "1080p",
+    val currentTranscodeProfile: String = BuildConfig.DEFAULT_STREAM_PROFILE,
+    val resizeMode: Int = AspectRatioFrameLayout.RESIZE_MODE_FIT,
+    val isUltraWideExpanded: Boolean = false,
+    val isLocalOffline: Boolean = false,
     val currentPositionSeconds: Double = 0.0,
     val durationSeconds: Double = 0.0,
     val progressPercent: Int = 0,
@@ -84,15 +90,17 @@ class CinemaPlayer(
     var onDecoderFallback: (() -> Unit)? = null
 
     init {
+        val minBuffer = BuildConfig.BUFFER_MIN_MS
+        val maxBuffer = BuildConfig.BUFFER_MAX_MS
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                15_000, // min buffer
-                60_000, // max buffer
+                minBuffer,
+                maxBuffer,
                 1_500,  // buffer for playback
                 2_500   // buffer for playback after rebuffer
             )
             .setPrioritizeTimeOverSizeThresholds(true)
-            .setBackBuffer(10_000, true)
+            .setBackBuffer(15_000, true)
             .build()
 
         val renderersFactory = object : DefaultRenderersFactory(context) {
@@ -526,6 +534,57 @@ class CinemaPlayer(
         player.setMediaItem(newMediaItem)
         player.prepare()
         player.playWhenReady = true
+    }
+
+    /**
+     * Switch between transcode profiles (direct, 1080p, 720p, 480p, 360p) on the fly
+     * seamlessly retaining exact playback timestamp.
+     */
+    fun switchTranscodeProfile(
+        profile: String,
+        directStreamUrl: String,
+        baseUrl: String,
+        mediaSourceId: String?,
+        fileIdx: Int = 0
+    ) {
+        val targetUrl = if (profile == "direct" || mediaSourceId.isNullOrBlank()) {
+            directStreamUrl
+        } else {
+            val cleanBase = baseUrl.trimEnd('/')
+            val activeAudio = _uiState.value.selectedAudioIndex
+            val audioParam = if (activeAudio >= 0) "&audio=$activeAudio" else ""
+            val startSec = (_uiState.value.currentPositionSeconds).toInt()
+            "$cleanBase/api/stream/transcode/$mediaSourceId/master.m3u8?profile=$profile&file_idx=$fileIdx$audioParam&start=$startSec"
+        }
+
+        _uiState.value = _uiState.value.copy(currentTranscodeProfile = profile)
+        switchQuality(
+            newStreamUrl = targetUrl,
+            tierName = if (profile == "direct") _uiState.value.currentQualityTier else profile.uppercase(),
+            audioTracks = _uiState.value.audioTracks,
+            subtitleTracks = _uiState.value.subtitleTracks
+        )
+    }
+
+    fun toggleResizeMode() {
+        val nextMode = when (_uiState.value.resizeMode) {
+            AspectRatioFrameLayout.RESIZE_MODE_FIT -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM // 21:9 CinemaScope
+            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        }
+        _uiState.value = _uiState.value.copy(resizeMode = nextMode)
+    }
+
+    fun setResizeMode(mode: Int) {
+        _uiState.value = _uiState.value.copy(resizeMode = mode)
+    }
+
+    fun toggleUltraWideExpanded() {
+        _uiState.value = _uiState.value.copy(isUltraWideExpanded = !_uiState.value.isUltraWideExpanded)
+    }
+
+    fun setUltraWideExpanded(expanded: Boolean) {
+        _uiState.value = _uiState.value.copy(isUltraWideExpanded = expanded)
     }
 
     fun seekRelative(secondsDelta: Int) {

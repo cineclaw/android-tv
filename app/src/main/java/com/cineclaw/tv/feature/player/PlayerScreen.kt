@@ -23,6 +23,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -37,10 +39,12 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
+import com.cineclaw.tv.BuildConfig
 import com.cineclaw.tv.core.designsystem.*
 import com.cineclaw.tv.core.model.EpisodeInfo
 import com.cineclaw.tv.core.model.QualityGroup
@@ -62,15 +66,20 @@ fun PlayerScreen(
     episode: Int? = null,
     seasons: List<Int> = emptyList(),
     episodes: List<EpisodeInfo> = emptyList(),
+    mediaSourceId: String? = null,
+    directStreamUrl: String? = null,
+    baseUrl: String = "",
     onSelectQualityRelease: (TorrentRelease) -> Unit,
     onNextEpisodeClick: () -> Unit = {},
     onSelectEpisode: (season: Int, episode: Int) -> Unit = { _, _ -> },
     onFetchSeasonEpisodes: (season: Int) -> Unit = {},
+    onToggleUltraWide: (() -> Unit)? = null,
     onClosePlayer: () -> Unit
 ) {
     val uiState by cinemaPlayer.uiState.collectAsState()
     var showControls by remember { mutableStateOf(true) }
     var showQualityDialog by remember { mutableStateOf(false) }
+    var showTranscodeDialog by remember { mutableStateOf(false) }
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showEpisodesDialog by remember { mutableStateOf(false) }
@@ -186,6 +195,25 @@ fun PlayerScreen(
             .background(Color.Black)
             .focusRequester(rootFocusRequester)
             .focusable()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        lastInteraction = System.currentTimeMillis()
+                        showControls = !showControls
+                    },
+                    onDoubleTap = { offset ->
+                        lastInteraction = System.currentTimeMillis()
+                        val screenWidth = size.width
+                        if (offset.x < screenWidth / 2) {
+                            cinemaPlayer.seekRelative(-10)
+                            seekBubbleText = "-10с"
+                        } else {
+                            cinemaPlayer.seekRelative(10)
+                            seekBubbleText = "+10с"
+                        }
+                    }
+                )
+            }
             .onPreviewKeyEvent { keyEvent ->
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     lastInteraction = System.currentTimeMillis()
@@ -230,7 +258,11 @@ fun PlayerScreen(
                     isFocusable = false
                     isFocusableInTouchMode = false
                     descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                    resizeMode = uiState.resizeMode
                 }
+            },
+            update = { playerView ->
+                playerView.resizeMode = uiState.resizeMode
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -444,14 +476,55 @@ fun PlayerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text(text = title, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                        if (!subtitle.isNullOrBlank()) {
-                            Text(text = subtitle, color = EmeraldPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Touch Close Button
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(ObsidianCard)
+                                .border(1.dp, ObsidianBorder, RoundedCornerShape(12.dp))
+                                .clickable { onClosePlayer() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = TextPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column {
+                            Text(text = title, color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                            if (!subtitle.isNullOrBlank()) {
+                                Text(text = subtitle, color = EmeraldPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            }
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Lynk & Co 900 Full-Width / Half-Screen Expansion Button
+                        if (BuildConfig.IS_AUTOMOTIVE) {
+                            val isExpanded = uiState.isUltraWideExpanded
+                            TvActionButton(
+                                text = if (isExpanded) "В пол-экрана" else "На весь экран",
+                                icon = if (isExpanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                isPrimary = isExpanded,
+                                onClick = {
+                                    lastInteraction = System.currentTimeMillis()
+                                    cinemaPlayer.toggleUltraWideExpanded()
+                                    onToggleUltraWide?.invoke()
+                                }
+                            )
+                        }
+
                         val tier = uiState.currentQualityTier.lowercase()
                         val is4k = tier.contains("4k") || tier.contains("2160")
                         TvBadge(
@@ -459,7 +532,26 @@ fun PlayerScreen(
                             backgroundColor = if (is4k) AmberGlow else EmeraldGlow,
                             textColor = if (is4k) AmberUHD else EmeraldPrimary
                         )
-                        TvBadge(text = "DIRECT STREAM", backgroundColor = EmeraldGlow, textColor = EmeraldPrimary)
+
+                        // Transcoding Profile Badge / Quick Button
+                        val profileText = when (uiState.currentTranscodeProfile) {
+                            "direct" -> "DIRECT STREAM"
+                            else -> "TRANSCODE ${uiState.currentTranscodeProfile.uppercase()}"
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    lastInteraction = System.currentTimeMillis()
+                                    showTranscodeDialog = true
+                                }
+                        ) {
+                            TvBadge(
+                                text = profileText,
+                                backgroundColor = if (uiState.currentTranscodeProfile == "direct") EmeraldGlow else AmberGlow,
+                                textColor = if (uiState.currentTranscodeProfile == "direct") EmeraldPrimary else AmberUHD
+                            )
+                        }
                     }
                 }
 
