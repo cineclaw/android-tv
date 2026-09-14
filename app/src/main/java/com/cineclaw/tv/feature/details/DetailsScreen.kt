@@ -80,8 +80,9 @@ fun DetailsScreen(
             if (sSummary != null && !sSummary.isCompleted) return true
         }
         for (e in 1 until targetEpisode) {
-            val key = "${targetSeason}_$e"
-            val status = seriesProgress.episodes[key]
+            val keyUnderscore = "${targetSeason}_$e"
+            val keyX = "${targetSeason}x$e"
+            val status = seriesProgress.episodes[keyX] ?: seriesProgress.episodes[keyUnderscore]
             if (status?.isCompleted != true) return true
         }
         return false
