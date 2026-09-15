@@ -336,6 +336,19 @@ fun HomeScreen(
                     ) {
                         Text(text = "Буду смотреть", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
+
+                    NavigationDrawerItem(
+                        selected = false,
+                        enabled = isDrawerOpen,
+                        onClick = { onNavigateNavRail("downloads") },
+                        modifier = drawerItemModifier,
+                        leadingContent = {
+                            Icon(Icons.Default.Download, contentDescription = "Загрузки", modifier = Modifier.size(20.dp))
+                        },
+                        colors = drawerItemColors
+                    ) {
+                        Text(text = "Загрузки", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
 
                 // Settings Item

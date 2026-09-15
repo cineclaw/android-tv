@@ -88,6 +88,16 @@ interface CineClawApi {
         @Query("episode") episode: Int? = null
     ): PlayerInfoResponse
 
+    @GET("/api/stream/stats")
+    suspend fun getStreamStats(
+        @Query("hash") hash: String? = null,
+        @Query("tconst") tconst: String? = null,
+        @Query("file_idx") fileIdx: Int? = null,
+        @Query("season") season: Int? = null,
+        @Query("episode") episode: Int? = null,
+        @Query("duration") duration: Double? = null
+    ): StreamStats
+
     @POST("/api/stream/mount")
     suspend fun mountTorrent(@Body req: MountTorrentRequest): PlayerInfoResponse
 

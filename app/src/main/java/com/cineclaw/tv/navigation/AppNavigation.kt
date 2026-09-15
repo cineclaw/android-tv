@@ -47,6 +47,11 @@ import kotlinx.coroutines.launch
 import java.net.URLDecoder
 import java.net.URLEncoder
 
+import com.cineclaw.tv.feature.downloads.DownloadsScreen
+import com.cineclaw.tv.core.download.DownloadManager
+import com.cineclaw.tv.core.download.DownloadService
+import com.cineclaw.tv.core.download.OfflineMetadata
+
 private fun safeDecode(str: String?): String {
     if (str.isNullOrBlank()) return ""
     return runCatching { URLDecoder.decode(str, "UTF-8") }.getOrDefault(str.replace('+', ' '))
@@ -103,6 +108,7 @@ sealed class Screen(val route: String) {
         fun createRoute(type: String): String = "catalog/$type"
     }
     object Watchlist : Screen("watchlist")
+    object Downloads : Screen("downloads")
     object Search : Screen("search")
     object Settings : Screen("settings")
 }
@@ -251,6 +257,7 @@ fun AppNavigation(
                         "series" -> navController.navigate(Screen.Catalog.createRoute("series"))
                         "4k" -> navController.navigate(Screen.Catalog.createRoute("4k"))
                         "watchlist" -> navController.navigate(Screen.Watchlist.route)
+                        "downloads" -> navController.navigate(Screen.Downloads.route)
                     }
                 },
                 onDeleteResumeItem = { resume ->
@@ -541,6 +548,61 @@ fun AppNavigation(
                         } catch (e: Exception) {}
                     }
                 },
+                onDownloadClick = { season, episode ->
+                    scope.launch {
+                        val bestRelease = selectBestReleaseForQuality(
+                            qualityGroups = qualityGroups,
+                            preferredQuality = preferredQuality,
+                            targetSeason = season
+                        )
+                        if (bestRelease != null && bestRelease.magnet.isNotBlank()) {
+                            try {
+                                val api = app.apiClient.getApi()
+                                api.mountTorrent(
+                                    MountTorrentRequest(
+                                        tconst = media.effectiveTconst,
+                                        magnet = bestRelease.magnet,
+                                        title = bestRelease.title,
+                                        type = if (media.isTv) "tvSeries" else "movie",
+                                        season = season,
+                                        episode = episode
+                                    )
+                                )
+                                var info = api.getPlayerInfo(media.effectiveTconst, season, episode)
+                                if (!info.success || info.effectiveStreamUrl == null) {
+                                    delay(1000)
+                                    info = api.getPlayerInfo(media.effectiveTconst, season, episode)
+                                }
+                                val rawUrl = info.effectiveStreamUrl
+                                if (rawUrl != null) {
+                                    val fullUrl = if (rawUrl.startsWith("http")) rawUrl else "$serverUrl$rawUrl"
+                                    val downloadId = if (season != null && episode != null) "${media.effectiveTconst}_s${season}_e$episode" else media.effectiveTconst
+                                    val meta = OfflineMetadata(
+                                        id = downloadId,
+                                        tconst = media.effectiveTconst,
+                                        title = media.displayTitle,
+                                        subtitle = if (season != null && episode != null) "Сезон $season, Серия $episode" else null,
+                                        posterUrl = media.posterUrl,
+                                        year = media.year,
+                                        season = season,
+                                        episode = episode,
+                                        mediaType = if (media.isTv) "tv" else "movie",
+                                        quality = bestRelease.resolution.ifBlank { "1080p" },
+                                        fileSize = bestRelease.size
+                                    )
+                                    val dm = DownloadManager.getInstance(context)
+                                    dm.enqueueDownload(downloadId, meta, fullUrl)
+                                    DownloadService.startService(context)
+                                    Toast.makeText(context, "Загрузка «${media.displayTitle}» запущена", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Ошибка скачивания: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "Нет доступных торрентов для скачивания", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
                 onBackClick = { navController.popBackStack() }
             )
         }
@@ -581,8 +643,31 @@ fun AppNavigation(
             var pendingResumeInfo by remember { mutableStateOf<PendingResumeState?>(null) }
             var seasonsList by remember { mutableStateOf<List<Int>>(emptyList()) }
             var episodesList by remember { mutableStateOf<List<EpisodeInfo>>(emptyList()) }
+            var activePlayerInfo by remember { mutableStateOf<PlayerInfoResponse?>(null) }
+            var activeStreamUrl by remember { mutableStateOf<String?>(null) }
 
             LaunchedEffect(tconst, seasonArg, episodeArg) {
+                // Check local offline downloads first for instant 100% offline playback
+                val dm = DownloadManager.getInstance(context)
+                val offlineItem = dm.offlineMediaState.value.find { 
+                    it.metadata.tconst == tconst || it.metadata.id == tconst ||
+                    (seasonArg != null && episodeArg != null && it.metadata.id == "${tconst}_s${seasonArg}_e${episodeArg}")
+                }
+                if (offlineItem != null && offlineItem.file.exists()) {
+                    val localUri = offlineItem.file.toURI().toString()
+                    activeStreamUrl = localUri
+                    cinemaPlayer.prepare(
+                        streamUrl = localUri,
+                        tconst = tconst,
+                        title = title,
+                        season = seasonArg,
+                        episode = episodeArg,
+                        initialPositionMs = 0L,
+                        quality = offlineItem.metadata.quality
+                    )
+                    return@LaunchedEffect
+                }
+
                 try {
                     val api = app.apiClient.getApi()
                     // Fetch series seasons and episodes if playing a TV show
@@ -634,6 +719,8 @@ fun AppNavigation(
                     val rawStreamUrl = playerInfo?.effectiveStreamUrl
                     if (playerInfo != null && rawStreamUrl != null) {
                         val fullStreamUrl = if (rawStreamUrl.startsWith("http")) rawStreamUrl else "$serverUrl$rawStreamUrl"
+                        activeStreamUrl = fullStreamUrl
+                        activePlayerInfo = playerInfo
 
                         val resolvedQuality = when {
                             qualityArg.contains("4k", ignoreCase = true) || qualityArg.contains("2160", ignoreCase = true) -> "4K UHD"
@@ -812,6 +899,9 @@ fun AppNavigation(
                     episode = episodeArg,
                     seasons = seasonsList,
                     episodes = episodesList,
+                    mediaSourceId = activePlayerInfo?.mediaSourceId ?: tconst,
+                    directStreamUrl = activeStreamUrl,
+                    baseUrl = serverUrl,
                     onSelectQualityRelease = { release ->
                         scope.launch {
                             try {
@@ -1250,6 +1340,24 @@ fun AppNavigation(
                             watchlistItems = watchlistItems.filter { it.effectiveTconst != item.effectiveTconst }
                         } catch (e: Exception) {}
                     }
+                },
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.Downloads.route) {
+            DownloadsScreen(
+                onPlayOfflineFile = { file, meta ->
+                    val fileUri = file.toURI().toString()
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            tconst = meta.tconst,
+                            title = meta.title,
+                            season = meta.season,
+                            episode = meta.episode,
+                            quality = meta.quality
+                        )
+                    )
                 },
                 onBackClick = { navController.popBackStack() }
             )

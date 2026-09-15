@@ -525,6 +525,11 @@ fun PlayerScreen(
                             )
                         }
 
+                        // Cellular Signal Strength & Download Speed Indicator
+                        uiState.streamStats?.let { stats ->
+                            TvSignalStrengthBadge(stats = stats)
+                        }
+
                         val tier = uiState.currentQualityTier.lowercase()
                         val is4k = tier.contains("4k") || tier.contains("2160")
                         TvBadge(
@@ -661,6 +666,35 @@ fun PlayerScreen(
                             }
                         )
 
+                        // Transcode Switcher (for Auto / Mobile LTE)
+                        TvActionButton(
+                            text = if (uiState.currentTranscodeProfile == "direct") "Транскод" else uiState.currentTranscodeProfile.uppercase(),
+                            icon = Icons.Default.Speed,
+                            isPrimary = uiState.currentTranscodeProfile != "direct",
+                            modifier = buttonUpModifier,
+                            onClick = {
+                                lastInteraction = System.currentTimeMillis()
+                                showTranscodeDialog = true
+                            }
+                        )
+
+                        // Aspect Ratio / CinemaScope 21:9 Zoom Switcher
+                        val resizeLabel = when (uiState.resizeMode) {
+                            AspectRatioFrameLayout.RESIZE_MODE_ZOOM -> "21:9 Зум"
+                            AspectRatioFrameLayout.RESIZE_MODE_FILL -> "Растянуть"
+                            else -> "Кадр"
+                        }
+                        TvActionButton(
+                            text = resizeLabel,
+                            icon = Icons.Default.AspectRatio,
+                            isPrimary = uiState.resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM,
+                            modifier = buttonUpModifier,
+                            onClick = {
+                                lastInteraction = System.currentTimeMillis()
+                                cinemaPlayer.toggleResizeMode()
+                            }
+                        )
+
                         // Audio Track Switcher
                         val audioSummary = if (uiState.audioTracks.isNotEmpty()) {
                             val activeAudio = uiState.audioTracks.getOrNull(uiState.selectedAudioIndex)
@@ -737,6 +771,24 @@ fun PlayerScreen(
                     onSelectQualityRelease(rel)
                 },
                 onDismiss = { showQualityDialog = false }
+            )
+        }
+
+        // Transcode Switcher Dialog
+        if (showTranscodeDialog) {
+            TranscodeDialog(
+                currentProfile = uiState.currentTranscodeProfile,
+                onSelectProfile = { profile ->
+                    lastInteraction = System.currentTimeMillis()
+                    cinemaPlayer.switchTranscodeProfile(
+                        profile = profile,
+                        directStreamUrl = directStreamUrl ?: "",
+                        baseUrl = baseUrl,
+                        mediaSourceId = mediaSourceId,
+                        fileIdx = 0
+                    )
+                },
+                onDismiss = { showTranscodeDialog = false }
             )
         }
 
@@ -971,3 +1023,80 @@ private fun formatSeconds(sec: Double): String {
         String.format("%02d:%02d", m, s)
     }
 }
+
+/**
+ * Cellular-style signal strength & swarm download speed badge (4 stepped bars).
+ * Compares swarm throughput against video bitrate (SpeedRatio >= 1.0 is healthy green).
+ */
+@Composable
+private fun TvSignalStrengthBadge(
+    stats: com.cineclaw.tv.core.model.StreamStats,
+    modifier: Modifier = Modifier
+) {
+    val level = stats.signalLevel
+    val speedText = stats.downloadSpeedFmt
+    val seeds = stats.connectedSeeders
+
+    val activeColor = when (level) {
+        4 -> EmeraldPrimary
+        3 -> Color(0xFF34D399)
+        2 -> AmberUHD
+        1 -> Color(0xFFEF4444)
+        else -> TextMuted
+    }
+    val inactiveColor = Color(0x33FFFFFF)
+    val bgColor = when (level) {
+        4, 3 -> EmeraldGlow
+        2 -> AmberGlow
+        1 -> Color(0x22EF4444)
+        else -> Color(0x1AFFFFFF)
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .border(1.dp, activeColor.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        // 4-bar stepped cellular signal icon
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.height(13.dp)
+        ) {
+            val barHeights = listOf(4.dp, 7.dp, 10.dp, 13.dp)
+            barHeights.forEachIndexed { index, h ->
+                val isLit = (index + 1) <= level
+                Box(
+                    modifier = Modifier
+                        .width(3.dp)
+                        .height(h)
+                        .clip(RoundedCornerShape(1.5.dp))
+                        .background(if (isLit) activeColor else inactiveColor)
+                )
+            }
+        }
+
+        // Formatted speed label
+        Text(
+            text = speedText,
+            color = activeColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        // Seeders count badge
+        if (seeds > 0) {
+            Text(
+                text = "🌱 $seeds",
+                color = TextSecondary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+

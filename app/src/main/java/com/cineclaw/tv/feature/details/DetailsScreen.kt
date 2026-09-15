@@ -62,6 +62,7 @@ fun DetailsScreen(
     onToggleWatchlist: () -> Unit = {},
     onSelectSeason: (Int) -> Unit = {},
     onMarkWatched: (MarkWatchedRequest) -> Unit = {},
+    onDownloadClick: ((Int?, Int?) -> Unit)? = null,
     onBackClick: () -> Unit = {}
 ) {
     var showQualityDialog by remember { mutableStateOf(false) }
@@ -299,6 +300,15 @@ fun DetailsScreen(
                                 isPrimary = false,
                                 onClick = { onToggleWatchlist() }
                             )
+
+                            if (onDownloadClick != null) {
+                                TvActionButton(
+                                    text = "Скачать",
+                                    icon = Icons.Default.FileDownload,
+                                    isPrimary = false,
+                                    onClick = { onDownloadClick(if (media.isTv) selectedSeason else null, if (media.isTv) 1 else null) }
+                                )
+                            }
                         }
 
                         // Overview / Synopsis

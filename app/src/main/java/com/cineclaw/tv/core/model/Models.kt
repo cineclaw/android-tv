@@ -331,6 +331,7 @@ data class PlayerInfoResponse(
     val success: Boolean = true,
     val error: String? = null,
     @SerialName("item_id") val itemId: String = "",
+    @SerialName("media_source_id") val mediaSourceId: String? = null,
     @SerialName("stream_url") val streamUrl: String? = null,
     @SerialName("active_stream_url") val activeStreamUrl: String? = null,
     @SerialName("direct_stream_url") val directStreamUrl: String? = null,
@@ -347,11 +348,36 @@ data class PlayerInfoResponse(
     val torrents: List<TorrentRelease> = emptyList(),
     val qualityGroups: List<QualityGroup> = emptyList()
 ) {
+    val effectiveMediaSourceId: String get() = mediaSourceId?.takeIf { it.isNotBlank() } ?: itemId
     val effectiveSubtitles: List<SubtitleTrack> get() = subtitleTracks.ifEmpty { subtitles }
     val effectiveResumeSeconds: Double get() = (resumePositionSeconds?.takeIf { it > 0 } ?: resumeSeconds) ?: 0.0
     val effectiveDurationSeconds: Double get() = durationSeconds ?: 0.0
     val effectiveStreamUrl: String? get() = directStreamUrl ?: activeStreamUrl ?: streamUrl ?: releases.firstOrNull()?.streamUrl
 }
+
+@Serializable
+data class StreamStats(
+    val success: Boolean = false,
+    val hash: String = "",
+    @SerialName("download_speed") val downloadSpeed: Double = 0.0,
+    @SerialName("upload_speed") val uploadSpeed: Double = 0.0,
+    @SerialName("download_speed_fmt") val downloadSpeedFmt: String = "0 КБ/с",
+    @SerialName("upload_speed_fmt") val uploadSpeedFmt: String = "0 КБ/с",
+    @SerialName("connected_seeders") val connectedSeeders: Int = 0,
+    @SerialName("active_peers") val activePeers: Int = 0,
+    @SerialName("total_peers") val totalPeers: Int = 0,
+    @SerialName("half_open_peers") val halfOpenPeers: Int = 0,
+    @SerialName("loaded_size") val loadedSize: Long = 0L,
+    @SerialName("torrent_size") val torrentSize: Long = 0L,
+    @SerialName("preloaded_bytes") val preloadedBytes: Long = 0L,
+    @SerialName("video_bitrate") val videoBitrate: Long = 0L,
+    @SerialName("video_bitrate_fmt") val videoBitrateFmt: String = "",
+    @SerialName("speed_ratio") val speedRatio: Double = 0.0,
+    @SerialName("signal_level") val signalLevel: Int = 0, // 0..4
+    @SerialName("signal_status") val signalStatus: String = "",
+    val stat: Int = 0,
+    @SerialName("stat_string") val statString: String = ""
+)
 
 @Serializable
 data class MountTorrentRequest(

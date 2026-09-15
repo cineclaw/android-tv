@@ -60,7 +60,8 @@ data class PlayerUiState(
     val selectedSubtitleIndex: Int = -1, // -1 is off
     val showNextEpisodeBanner: Boolean = false,
     val countdownNextEpisode: Int = 10,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val streamStats: com.cineclaw.tv.core.model.StreamStats? = null
 )
 
 @OptIn(UnstableApi::class)
@@ -73,6 +74,7 @@ class CinemaPlayer(
     val exoPlayer: ExoPlayer
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var progressJob: Job? = null
+    private var statsJob: Job? = null
 
     private val _uiState = MutableStateFlow(PlayerUiState(currentQualityTier = initialQualityTier))
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -478,6 +480,7 @@ class CinemaPlayer(
         )
 
         startProgressTicker()
+        startStatsPolling()
     }
 
     fun initializePlayer(
@@ -763,8 +766,35 @@ class CinemaPlayer(
         }
     }
 
+    private fun startStatsPolling() {
+        statsJob?.cancel()
+        statsJob = coroutineScope.launch {
+            while (isActive) {
+                if (_uiState.value.isPlaying || _uiState.value.isBuffering) {
+                    try {
+                        val stats = withContext(Dispatchers.IO) {
+                            apiClient.getApi().getStreamStats(
+                                tconst = currentTconst.takeIf { it.isNotBlank() },
+                                season = currentSeason,
+                                episode = currentEpisode,
+                                duration = _uiState.value.durationSeconds.takeIf { it > 0 }
+                            )
+                        }
+                        if (stats.success) {
+                            _uiState.value = _uiState.value.copy(streamStats = stats)
+                        }
+                    } catch (e: Exception) {
+                        // Silently ignore stats polling network hiccups
+                    }
+                }
+                delay(3000)
+            }
+        }
+    }
+
     fun release() {
         progressJob?.cancel()
+        statsJob?.cancel()
         syncWatchProgress(isCompleted = false)
         exoPlayer.release()
         coroutineScope.cancel()
