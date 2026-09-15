@@ -60,7 +60,9 @@ interface CineClawApi {
     suspend fun getTorrents(
         @Query("imdb_id") imdbId: String? = null,
         @Query("q") query: String? = null,
-        @Query("type") type: String? = null
+        @Query("type") type: String? = null,
+        @Query("season") season: Int? = null,
+        @Query("refresh_cache") refreshCache: Boolean? = null
     ): List<TorrentRelease>
 
     @GET("/api/movie/{tconst}/metadata")

@@ -332,6 +332,30 @@ fun AppNavigation(
             var isLoadingMetadata by remember { mutableStateOf(true) }
             var isInWatchlist by remember { mutableStateOf(false) }
             var seriesProgress by remember { mutableStateOf<SeriesProgressResponse?>(null) }
+            var isRefreshingTorrents by remember { mutableStateOf(false) }
+
+            val onRefreshTorrents: () -> Unit = {
+                scope.launch {
+                    isRefreshingTorrents = true
+                    try {
+                        val api = app.apiClient.getApi()
+                        val torrentQuery = media.ruTitle?.ifEmpty { media.title } ?: media.title
+                        val torrentType = if (media.isTv) "tv" else "movie"
+                        val realTconst = media.effectiveTconst
+                        val torrents = api.getTorrents(
+                            imdbId = realTconst.takeIf { it.isNotBlank() },
+                            query = torrentQuery.takeIf { it.isNotBlank() },
+                            type = torrentType,
+                            refreshCache = true
+                        )
+                        qualityGroups = groupTorrents(torrents)
+                    } catch (e: Exception) {
+                        android.util.Log.e("CineClaw", "onRefreshTorrents failed", e)
+                    } finally {
+                        isRefreshingTorrents = false
+                    }
+                }
+            }
 
             LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
                 if (media.isTv && media.effectiveTconst.isNotBlank()) {
@@ -447,6 +471,8 @@ fun AppNavigation(
                 isLoadingMetadata = isLoadingMetadata,
                 isInWatchlist = isInWatchlist,
                 seriesProgress = seriesProgress,
+                isRefreshingTorrents = isRefreshingTorrents,
+                onRefreshTorrents = onRefreshTorrents,
                 onPersonClick = { personId ->
                     navController.navigate(Screen.Person.createRoute(personId))
                 },

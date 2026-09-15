@@ -56,6 +56,8 @@ fun DetailsScreen(
     isLoadingMetadata: Boolean = false,
     isInWatchlist: Boolean = false,
     seriesProgress: SeriesProgressResponse? = null,
+    isRefreshingTorrents: Boolean = false,
+    onRefreshTorrents: () -> Unit = {},
     onPersonClick: (Long) -> Unit = {},
     onPlayClick: (Int?, Int?) -> Unit = { _, _ -> },
     onSelectQualityRelease: (TorrentRelease) -> Unit = {},
@@ -299,6 +301,13 @@ fun DetailsScreen(
                                 icon = if (isInWatchlist) Icons.Default.Check else Icons.Default.BookmarkBorder,
                                 isPrimary = false,
                                 onClick = { onToggleWatchlist() }
+                            )
+
+                            TvActionButton(
+                                text = if (isRefreshingTorrents) "Поиск..." else "Обновить",
+                                icon = Icons.Default.Refresh,
+                                isPrimary = false,
+                                onClick = { if (!isRefreshingTorrents) onRefreshTorrents() }
                             )
 
                             if (onDownloadClick != null) {
@@ -632,6 +641,8 @@ fun DetailsScreen(
         if (showQualityDialog) {
             QualityDialog(
                 qualityGroups = qualityGroups,
+                isRefreshing = isRefreshingTorrents,
+                onRefresh = onRefreshTorrents,
                 onSelectTorrent = onSelectQualityRelease,
                 onDismiss = { showQualityDialog = false }
             )

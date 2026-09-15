@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +43,8 @@ fun QualityDialog(
     qualityGroups: List<QualityGroup>,
     activeTorrentHash: String? = null,
     activeTier: String? = null,
+    isRefreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     onSelectTorrent: (TorrentRelease) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -146,32 +149,75 @@ fun QualityDialog(
                         )
                     }
 
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(ObsidianBackground)
-                            .tvFocusable(focusedScale = 1.05f, cornerRadius = 10.dp)
-                            .onKeyEvent { keyEvent ->
-                                val code = keyEvent.nativeKeyEvent.keyCode
-                                if (code == KeyEvent.KEYCODE_DPAD_CENTER ||
-                                    code == KeyEvent.KEYCODE_ENTER ||
-                                    code == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-                                    if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
-                                        onDismiss()
-                                    }
-                                    true
-                                } else false
-                            }
-                            .clickable { onDismiss() },
-                        contentAlignment = Alignment.Center
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть",
-                            tint = TextMuted,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        if (onRefresh != null) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(ObsidianBackground)
+                                    .tvFocusable(focusedScale = 1.05f, cornerRadius = 10.dp)
+                                    .onKeyEvent { keyEvent ->
+                                        val code = keyEvent.nativeKeyEvent.keyCode
+                                        if (code == KeyEvent.KEYCODE_DPAD_CENTER ||
+                                            code == KeyEvent.KEYCODE_ENTER ||
+                                            code == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                                            if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN && !isRefreshing) {
+                                                onRefresh()
+                                            }
+                                            true
+                                        } else false
+                                    }
+                                    .clickable(enabled = !isRefreshing) { onRefresh() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isRefreshing) {
+                                    CircularProgressIndicator(
+                                        color = EmeraldPrimary,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Обновить раздачи",
+                                        tint = TextMuted,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(ObsidianBackground)
+                                .tvFocusable(focusedScale = 1.05f, cornerRadius = 10.dp)
+                                .onKeyEvent { keyEvent ->
+                                    val code = keyEvent.nativeKeyEvent.keyCode
+                                    if (code == KeyEvent.KEYCODE_DPAD_CENTER ||
+                                        code == KeyEvent.KEYCODE_ENTER ||
+                                        code == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                                        if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
+                                            onDismiss()
+                                        }
+                                        true
+                                    } else false
+                                }
+                                .clickable { onDismiss() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Закрыть",
+                                tint = TextMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
