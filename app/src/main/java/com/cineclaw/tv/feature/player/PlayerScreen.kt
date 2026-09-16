@@ -44,11 +44,15 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.Icon
 import androidx.tv.material3.Text
+import androidx.tv.material3.Button
+import androidx.tv.material3.ButtonDefaults
+import androidx.tv.material3.Border
 import com.cineclaw.tv.BuildConfig
 import com.cineclaw.tv.core.designsystem.*
 import com.cineclaw.tv.core.model.EpisodeInfo
 import com.cineclaw.tv.core.model.QualityGroup
 import com.cineclaw.tv.core.model.TorrentRelease
+import com.cineclaw.tv.core.model.SkipSegment
 import com.cineclaw.tv.core.player.CinemaPlayer
 import com.cineclaw.tv.core.player.PlayerUiState
 import com.cineclaw.tv.feature.details.QualityDialog
@@ -69,6 +73,7 @@ fun PlayerScreen(
     mediaSourceId: String? = null,
     directStreamUrl: String? = null,
     baseUrl: String = "",
+    skipSegments: List<SkipSegment> = emptyList(),
     onSelectQualityRelease: (TorrentRelease) -> Unit,
     onNextEpisodeClick: () -> Unit = {},
     onSelectEpisode: (season: Int, episode: Int) -> Unit = { _, _ -> },
@@ -90,6 +95,24 @@ fun PlayerScreen(
     val rootFocusRequester = remember { FocusRequester() }
     val playPauseFocusRequester = remember { FocusRequester() }
     val scrubberFocusRequester = remember { FocusRequester() }
+    val skipButtonFocusRequester = remember { FocusRequester() }
+
+    val activeSkipSegment by remember(skipSegments, uiState.currentPositionSeconds) {
+        derivedStateOf {
+            val curPos = uiState.currentPositionSeconds
+            skipSegments.firstOrNull { curPos >= it.startTime && curPos < it.endTime }
+        }
+    }
+
+    // Autofocus on skip button with TV remote
+    LaunchedEffect(activeSkipSegment) {
+        if (activeSkipSegment != null) {
+            delay(120)
+            try {
+                skipButtonFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
 
     // Intercept Back button: dismiss OSD if visible, else exit player
     BackHandler(enabled = true) {
@@ -219,7 +242,20 @@ fun PlayerScreen(
                     lastInteraction = System.currentTimeMillis()
                     if (!showControls) {
                         when (keyEvent.nativeKeyEvent.keyCode) {
-                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
+                            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                                val curSkip = activeSkipSegment
+                                if (curSkip != null) {
+                                    if (curSkip.type == "credits") {
+                                        onNextEpisodeClick()
+                                    } else {
+                                        cinemaPlayer.seekTo(curSkip.endTime)
+                                    }
+                                    true
+                                } else {
+                                    showControls = true
+                                    true
+                                }
+                            }
                             KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
                                 showControls = true
                                 true
@@ -834,6 +870,65 @@ fun PlayerScreen(
                 },
                 onDismiss = { showEpisodesDialog = false }
             )
+        }
+
+        // Floating "Skip Intro" / "Next Episode" Button with TV Remote Autofocus
+        AnimatedVisibility(
+            visible = activeSkipSegment != null && !showQualityDialog && !showAudioDialog && !showSubtitleDialog && !showEpisodesDialog,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = if (showControls) 130.dp else 48.dp, end = 48.dp)
+        ) {
+            activeSkipSegment?.let { segment ->
+                Button(
+                    onClick = {
+                        if (segment.type == "credits") {
+                            onNextEpisodeClick()
+                        } else {
+                            cinemaPlayer.seekTo(segment.endTime)
+                        }
+                    },
+                    modifier = Modifier
+                        .focusRequester(skipButtonFocusRequester)
+                        .clip(RoundedCornerShape(32.dp)),
+                    colors = ButtonDefaults.colors(
+                        containerColor = Color(0xDD07090E),
+                        focusedContainerColor = Color(0xFF10B981),
+                        contentColor = Color.White,
+                        focusedContentColor = Color.Black
+                    ),
+                    scale = ButtonDefaults.scale(focusedScale = 1.08f),
+                    border = ButtonDefaults.border(
+                        focusedBorder = Border(
+                            border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF34D399)),
+                            shape = RoundedCornerShape(32.dp)
+                        ),
+                        border = Border(
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x44FFFFFF)),
+                            shape = RoundedCornerShape(32.dp)
+                        )
+                    ),
+                    contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (segment.type == "credits") Icons.Default.SkipNext else Icons.Default.FastForward,
+                            contentDescription = segment.label,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = segment.label,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
         }
     }
 }

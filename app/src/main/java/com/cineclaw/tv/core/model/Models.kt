@@ -346,7 +346,8 @@ data class PlayerInfoResponse(
     @SerialName("is_played") val isPlayed: Boolean = false,
     val releases: List<TorrentRelease> = emptyList(),
     val torrents: List<TorrentRelease> = emptyList(),
-    val qualityGroups: List<QualityGroup> = emptyList()
+    val qualityGroups: List<QualityGroup> = emptyList(),
+    @SerialName("skip_segments") val skipSegments: List<SkipSegment> = emptyList()
 ) {
     val effectiveMediaSourceId: String get() = mediaSourceId?.takeIf { it.isNotBlank() } ?: itemId
     val effectiveSubtitles: List<SubtitleTrack> get() = subtitleTracks.ifEmpty { subtitles }
@@ -354,6 +355,14 @@ data class PlayerInfoResponse(
     val effectiveDurationSeconds: Double get() = durationSeconds ?: 0.0
     val effectiveStreamUrl: String? get() = directStreamUrl ?: activeStreamUrl ?: streamUrl ?: releases.firstOrNull()?.streamUrl
 }
+
+@Serializable
+data class SkipSegment(
+    val type: String = "intro",
+    @SerialName("start_time") val startTime: Double = 0.0,
+    @SerialName("end_time") val endTime: Double = 0.0,
+    val label: String = "Пропустить заставку"
+)
 
 @Serializable
 data class StreamStats(

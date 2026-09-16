@@ -928,6 +928,7 @@ fun AppNavigation(
                     mediaSourceId = activePlayerInfo?.mediaSourceId ?: tconst,
                     directStreamUrl = activeStreamUrl,
                     baseUrl = serverUrl,
+                    skipSegments = activePlayerInfo?.skipSegments ?: emptyList(),
                     onSelectQualityRelease = { release ->
                         scope.launch {
                             try {

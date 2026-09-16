@@ -325,7 +325,7 @@ fun SettingsScreen(
                             .padding(20.dp)
                     ) {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SystemInfoRow("Клиент", "CineClaw Android TV (v1.2.0)")
+                            SystemInfoRow("Клиент", "CineClaw Android TV (v1.3.0)")
                             SystemInfoRow("Медиа-плеер", "Media3 ExoPlayer (Hardware MediaCodec)")
                             SystemInfoRow("Торрент-движок", "TorrServer Turbo (Порт 8092)")
                             SystemInfoRow("Авторизация", "HMAC-SHA256 Token")
