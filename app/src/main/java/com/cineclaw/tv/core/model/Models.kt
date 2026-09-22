@@ -514,15 +514,20 @@ data class ResumeItem(
     val effectiveBackdrop: String? get() = resolveImageUrl(backdropUrl ?: backdropPath, "https://image.tmdb.org/t/p/w1280")
 
     val timecodeFormatted: String get() {
-        val curM = (positionSeconds / 60).toInt()
-        val curS = (positionSeconds % 60).toInt()
-        val totH = (durationSeconds / 3600).toInt()
-        val totM = ((durationSeconds % 3600) / 60).toInt()
-        return if (totH > 0) {
-            String.format("%02d:%02d / %02d:%02d:00", curM, curS, totH, totM)
-        } else {
-            String.format("%02d:%02d / %02d:00", curM, curS, totM)
+        fun formatSec(sec: Double): String {
+            val total = sec.toLong().coerceAtLeast(0L)
+            val h = total / 3600
+            val m = (total % 3600) / 60
+            val s = total % 60
+            return if (h > 0) {
+                String.format("%d:%02d:%02d", h, m, s)
+            } else {
+                String.format("%02d:%02d", m, s)
+            }
         }
+        val pos = formatSec(positionSeconds)
+        val dur = if (durationSeconds > 0) formatSec(durationSeconds) else ""
+        return if (dur.isNotEmpty()) "$pos / $dur" else pos
     }
 }
 

@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -71,12 +72,15 @@ fun HomeScreen(
     trackerHotlistItems: List<MediaItem> = emptyList(),
     uhd4kItems: List<MediaItem> = emptyList(),
     shelves: List<Shelf> = emptyList(),
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
     lastFocusedCardKey: String? = null,
     onCardFocused: (String) -> Unit = {},
     onSelectMedia: (MediaItem) -> Unit,
     onResumeClick: (ResumeItem) -> Unit,
     onOpenShelf: (shelfId: String, title: String) -> Unit = { _, _ -> },
     onNavigateNavRail: (String) -> Unit,
+    onRetry: () -> Unit = {},
     onDeleteResumeItem: ((ResumeItem) -> Unit)? = null,
     onToggleWatchlist: ((MediaItem) -> Unit)? = null,
     onRemoveFromWatchlist: ((MediaItem) -> Unit)? = null
@@ -183,6 +187,14 @@ fun HomeScreen(
             }
         }
     }
+
+    val hasContent = featuredItems.isNotEmpty() ||
+            continueWatchingItems.isNotEmpty() ||
+            watchlistItems.isNotEmpty() ||
+            trackerFreshItems.isNotEmpty() ||
+            trackerHotlistItems.isNotEmpty() ||
+            uhd4kItems.isNotEmpty() ||
+            shelves.any { it.items.isNotEmpty() }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -370,16 +382,106 @@ fun HomeScreen(
             .fillMaxSize()
             .background(ObsidianBackground)
     ) {
-        CompositionLocalProvider(LocalBringIntoViewSpec provides tvVerticalBringIntoViewSpec) {
-            LazyColumn(
-                state = listState,
+        if (!hasContent) {
+            val retryFocusRequester = remember { FocusRequester() }
+            LaunchedEffect(Unit) {
+                delay(120)
+                try { retryFocusRequester.requestFocus() } catch (e: Exception) {}
+            }
+
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(start = 68.dp)
-                    .focusRestorer(),
-                contentPadding = PaddingValues(bottom = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp)
+                    .padding(start = 68.dp, end = 48.dp),
+                contentAlignment = Alignment.Center
             ) {
+                if (isLoading) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = EmeraldPrimary,
+                            modifier = Modifier.size(44.dp)
+                        )
+                        Text(
+                            text = "Загрузка медиатеки...",
+                            color = TextSecondary,
+                            fontSize = 16.sp
+                        )
+                    }
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier
+                            .widthIn(max = 540.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(ObsidianSurface)
+                            .border(1.dp, ObsidianBorder, RoundedCornerShape(24.dp))
+                            .padding(32.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
+                                .background(AmberUHD.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.CloudOff,
+                                contentDescription = null,
+                                tint = AmberUHD,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+
+                        Text(
+                            text = "Нет связи с сервером",
+                            color = TextPrimary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Text(
+                            text = errorMessage ?: "Не удалось загрузить данные с домашнего сервера CineClaw. Проверьте соединение или смените сервер в настройках.",
+                            color = TextSecondary,
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 19.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            TvActionButton(
+                                text = "Повторить попытку",
+                                icon = Icons.Default.Refresh,
+                                isPrimary = true,
+                                onClick = onRetry,
+                                modifier = Modifier.focusRequester(retryFocusRequester)
+                            )
+                            TvActionButton(
+                                text = "Настройки",
+                                icon = Icons.Default.Settings,
+                                isPrimary = false,
+                                onClick = { onNavigateNavRail("settings") }
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            CompositionLocalProvider(LocalBringIntoViewSpec provides tvVerticalBringIntoViewSpec) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 68.dp)
+                        .focusRestorer(),
+                    contentPadding = PaddingValues(bottom = 48.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
                 // Top Featured Hero Carousel
                 if (featuredItems.isNotEmpty()) {
                     item(key = "hero_carousel") {
@@ -586,6 +688,7 @@ fun HomeScreen(
             }
         }
     }
+}
 
     // Long Press Action Dialog Modal
     selectedActionTarget?.let { target ->

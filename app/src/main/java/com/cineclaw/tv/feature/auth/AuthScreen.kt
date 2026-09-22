@@ -46,7 +46,7 @@ fun AuthScreen(
     onCheckPing: (suspend (String) -> Boolean)? = null,
     onPollPairing: (suspend (String) -> Boolean)? = null
 ) {
-    var isManualMode by remember { mutableStateOf(false) }
+    var isManualMode by remember { mutableStateOf(true) }
     var serverUrlInput by remember { mutableStateOf(currentServerUrl) }
     var usernameInput by remember { mutableStateOf("admin") }
     var passwordInput by remember { mutableStateOf("wavemp3") }

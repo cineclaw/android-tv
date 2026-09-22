@@ -36,11 +36,17 @@ class HomeViewModel : ViewModel() {
 
     var isLoaded by mutableStateOf(false)
         private set
+    var isLoading by mutableStateOf(false)
+        private set
+    var errorMessage by mutableStateOf<String?>(null)
+        private set
 
     var lastFocusedCardKey by mutableStateOf<String?>(null)
 
     fun loadData(app: CineClawApp, forceRefresh: Boolean = false) {
         if (isLoaded && !forceRefresh) return
+        isLoading = true
+        errorMessage = null
         viewModelScope.launch {
             val api = app.apiClient.getApi()
             try {
@@ -48,6 +54,7 @@ class HomeViewModel : ViewModel() {
                 val payload = api.getHomeFeed(platform = "tv", refresh = forceRefresh)
                 applyHomePayload(payload)
                 isLoaded = true
+                isLoading = false
             } catch (e: Exception) {
                 android.util.Log.w("HomeViewModel", "getHomeFeed failed, falling back to legacy multi-call: ${e.message}")
                 loadDataLegacy(app)
@@ -94,7 +101,7 @@ class HomeViewModel : ViewModel() {
     private fun loadDataLegacy(app: CineClawApp) {
         viewModelScope.launch {
             val api = app.apiClient.getApi()
-            launch {
+            val j1 = launch {
                 try {
                     val fetchedShelves = api.getFeeds()
                     shelves = fetchedShelves
@@ -105,42 +112,47 @@ class HomeViewModel : ViewModel() {
                     android.util.Log.w("HomeViewModel", "getFeeds failed: ${e.message}")
                 }
             }
-            launch {
+            val j2 = launch {
                 try {
                     continueWatching = api.getContinueWatching()
                 } catch (e: Exception) {
                     android.util.Log.w("HomeViewModel", "getContinueWatching failed: ${e.message}")
                 }
             }
-            launch {
+            val j3 = launch {
                 try {
                     watchlistItems = api.getWatchlist()
                 } catch (e: Exception) {
                     android.util.Log.w("HomeViewModel", "getWatchlist failed: ${e.message}")
                 }
             }
-            launch {
+            val j4 = launch {
                 try {
                     trackerFresh = api.getHotlist(type = "new_movie").items
                 } catch (e: Exception) {
                     android.util.Log.w("HomeViewModel", "getHotlist new_movie failed: ${e.message}")
                 }
             }
-            launch {
+            val j5 = launch {
                 try {
                     trackerHotlist = api.getHotlist(type = "movie").items
                 } catch (e: Exception) {
                     android.util.Log.w("HomeViewModel", "getHotlist movie failed: ${e.message}")
                 }
             }
-            launch {
+            val j6 = launch {
                 try {
                     uhd4k = api.getHotlist(type = "movie", quality = "4k").items
                 } catch (e: Exception) {
                     android.util.Log.w("HomeViewModel", "getHotlist 4k failed: ${e.message}")
                 }
             }
+            j1.join(); j2.join(); j3.join(); j4.join(); j5.join(); j6.join()
             isLoaded = true
+            isLoading = false
+            if (featured.isEmpty() && shelves.isEmpty() && continueWatching.isEmpty() && trackerHotlist.isEmpty()) {
+                errorMessage = "Не удалось загрузить медиатеку. Проверьте подключение к серверу ${app.sessionManager.getServerUrlDirect()}"
+            }
         }
     }
 

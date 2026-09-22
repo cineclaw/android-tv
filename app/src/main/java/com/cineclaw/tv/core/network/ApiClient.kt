@@ -21,13 +21,17 @@ class ApiClient(private val sessionManager: SessionManager) {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .addInterceptor { chain ->
-                val requestBuilder = chain.request().newBuilder()
-                kotlinx.coroutines.runBlocking {
-                    sessionManager.getAuthTokenSync()?.let { token ->
-                        requestBuilder.addHeader("Authorization", "Bearer $token")
-                    }
+                val request = chain.request()
+                val requestBuilder = request.newBuilder()
+                sessionManager.getAuthTokenDirect()?.let { token ->
+                    requestBuilder.addHeader("Authorization", "Bearer $token")
                 }
-                chain.proceed(requestBuilder.build())
+                val response = chain.proceed(requestBuilder.build())
+                val path = request.url.encodedPath
+                if (response.code == 401 && !path.contains("/api/auth/login") && !path.contains("/api/auth/pair")) {
+                    sessionManager.clearSessionAsync()
+                }
+                response
             }
             .addInterceptor(HttpLoggingInterceptor().apply {
                 level = HttpLoggingInterceptor.Level.BASIC

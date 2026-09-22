@@ -127,6 +127,7 @@ fun AppNavigation(
     val preferredQuality by app.sessionManager.preferredQuality.collectAsState(initial = "4k")
     val serverUrl = currentServerUrl
 
+    val currentToken by app.sessionManager.authToken.collectAsState(initial = null)
     var hasCheckedAuth by remember { mutableStateOf(false) }
     var initialIsAuthenticated by remember { mutableStateOf(false) }
 
@@ -134,6 +135,17 @@ fun AppNavigation(
         val token = app.sessionManager.authToken.first()
         initialIsAuthenticated = !token.isNullOrBlank()
         hasCheckedAuth = true
+    }
+
+    LaunchedEffect(hasCheckedAuth, currentToken) {
+        if (hasCheckedAuth && currentToken.isNullOrBlank()) {
+            val currentRoute = navController.currentBackStackEntry?.destination?.route
+            if (currentRoute != null && currentRoute != Screen.Auth.route) {
+                navController.navigate(Screen.Auth.route) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        }
     }
 
     if (!hasCheckedAuth) {
@@ -208,8 +220,11 @@ fun AppNavigation(
                 trackerHotlistItems = homeViewModel.trackerHotlist,
                 uhd4kItems = homeViewModel.uhd4k,
                 shelves = homeViewModel.shelves,
+                isLoading = homeViewModel.isLoading,
+                errorMessage = homeViewModel.errorMessage,
                 lastFocusedCardKey = homeViewModel.lastFocusedCardKey,
                 onCardFocused = { homeViewModel.lastFocusedCardKey = it },
+                onRetry = { homeViewModel.loadData(app, forceRefresh = true) },
                 onSelectMedia = { media ->
                     navController.navigate(
                         Screen.Details.createRoute(
