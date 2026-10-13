@@ -24,7 +24,7 @@ class CineClawApp : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         return ImageLoader.Builder(context)
             .components {
-                add(OkHttpNetworkFetcherFactory(callFactory = { apiClient.getDirectOkHttpClient() }))
+                add(OkHttpNetworkFetcherFactory(callFactory = { apiClient.imageOkHttpClient }))
             }
             .build()
     }

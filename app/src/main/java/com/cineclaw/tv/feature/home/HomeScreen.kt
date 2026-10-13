@@ -8,6 +8,7 @@ import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -50,6 +51,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.tv.material3.*
 import coil3.compose.AsyncImage
 import com.cineclaw.tv.core.designsystem.*
+import com.cineclaw.tv.core.model.HomeShelf
 import com.cineclaw.tv.core.model.MediaItem
 import com.cineclaw.tv.core.model.ResumeItem
 import com.cineclaw.tv.core.model.Shelf
@@ -72,6 +74,7 @@ fun HomeScreen(
     trackerHotlistItems: List<MediaItem> = emptyList(),
     uhd4kItems: List<MediaItem> = emptyList(),
     shelves: List<Shelf> = emptyList(),
+    homeShelves: List<HomeShelf> = emptyList(),
     isLoading: Boolean = false,
     errorMessage: String? = null,
     lastFocusedCardKey: String? = null,
@@ -83,7 +86,10 @@ fun HomeScreen(
     onRetry: () -> Unit = {},
     onDeleteResumeItem: ((ResumeItem) -> Unit)? = null,
     onToggleWatchlist: ((MediaItem) -> Unit)? = null,
-    onRemoveFromWatchlist: ((MediaItem) -> Unit)? = null
+    onRemoveFromWatchlist: ((MediaItem) -> Unit)? = null,
+    activeProfileName: String = "Основной",
+    isKidsMode: Boolean = false,
+    onSwitchProfile: () -> Unit = {}
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val listState = rememberLazyListState()
@@ -194,7 +200,8 @@ fun HomeScreen(
             trackerFreshItems.isNotEmpty() ||
             trackerHotlistItems.isNotEmpty() ||
             uhd4kItems.isNotEmpty() ||
-            shelves.any { it.items.isNotEmpty() }
+            shelves.any { it.items.isNotEmpty() } ||
+            homeShelves.any { it.items.isNotEmpty() }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -238,33 +245,199 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxHeight()
                     .background(ObsidianSurface)
-                    .padding(vertical = 24.dp, horizontal = 12.dp)
+                    .padding(vertical = 20.dp, horizontal = 12.dp)
                     .focusProperties {
                         canFocus = isDrawerOpen
                     },
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Top Logo
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.padding(start = 6.dp, bottom = 12.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(EmeraldPrimary),
-                        contentAlignment = Alignment.Center
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Top Logo
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.padding(start = 6.dp, bottom = 4.dp)
                     ) {
-                        Text(text = "C", color = ObsidianBackground, fontSize = 20.sp, fontWeight = FontWeight.Black)
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isKidsMode) AmberUHD else EmeraldPrimary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(text = if (isKidsMode) "🧸" else "C", color = ObsidianBackground, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                        }
+                        if (isDrawerOpen) {
+                            Column {
+                                Text(text = if (isKidsMode) "CineClaw Kids" else "CineClaw", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                if (isKidsMode) {
+                                    Text(text = "Детский режим", color = AmberUHD, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
                     }
-                    if (isDrawerOpen) {
-                        Text(text = "CineClaw", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                    // Profile Switcher Item
+                    NavigationDrawerItem(
+                        selected = false,
+                        enabled = isDrawerOpen,
+                        onClick = {
+                            scope.launch {
+                                drawerState.setValue(DrawerValue.Closed)
+                            }
+                            onSwitchProfile()
+                        },
+                        modifier = drawerItemModifier,
+                        leadingContent = {
+                            Text(text = if (isKidsMode) "🧸" else "👤", fontSize = 18.sp)
+                        },
+                        colors = drawerItemColors
+                    ) {
+                        Column {
+                            Text(
+                                text = activeProfileName,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (isKidsMode) "Детский профиль ▾" else "Сменить профиль ▾",
+                                fontSize = 10.sp,
+                                color = if (isKidsMode) AmberUHD else TextMuted
+                            )
+                        }
+                    }
+
+                    // Navigation Items
+                    Column(
+                        modifier = Modifier.focusProperties {
+                            canFocus = isDrawerOpen
+                        },
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        NavigationDrawerItem(
+                            selected = false,
+                            enabled = isDrawerOpen,
+                            onClick = { onNavigateNavRail("home") },
+                            modifier = drawerItemModifier.focusRequester(drawerFocusRequester),
+                            leadingContent = {
+                                Icon(Icons.Default.Home, contentDescription = "Главная", modifier = Modifier.size(20.dp))
+                            },
+                            colors = drawerItemColors
+                        ) {
+                            Text(text = "Главная", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        NavigationDrawerItem(
+                            selected = false,
+                            enabled = isDrawerOpen,
+                            onClick = { onNavigateNavRail("search") },
+                            modifier = drawerItemModifier,
+                            leadingContent = {
+                                Icon(Icons.Default.Search, contentDescription = "Поиск", modifier = Modifier.size(20.dp))
+                            },
+                            colors = drawerItemColors
+                        ) {
+                            Text(text = "Поиск", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        if (isKidsMode) {
+                            NavigationDrawerItem(
+                                selected = false,
+                                enabled = isDrawerOpen,
+                                onClick = { onNavigateNavRail("cartoons") },
+                                modifier = drawerItemModifier,
+                                leadingContent = {
+                                    Icon(Icons.Default.Movie, contentDescription = "Мультфильмы", modifier = Modifier.size(20.dp))
+                                },
+                                colors = drawerItemColors
+                            ) {
+                                Text(text = "Мультфильмы", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            NavigationDrawerItem(
+                                selected = false,
+                                enabled = isDrawerOpen,
+                                onClick = { onNavigateNavRail("series") },
+                                modifier = drawerItemModifier,
+                                leadingContent = {
+                                    Icon(Icons.Default.Tv, contentDescription = "Мультсериалы", modifier = Modifier.size(20.dp))
+                                },
+                                colors = drawerItemColors
+                            ) {
+                                Text(text = "Мультсериалы", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        } else {
+                            NavigationDrawerItem(
+                                selected = false,
+                                enabled = isDrawerOpen,
+                                onClick = { onNavigateNavRail("movies") },
+                                modifier = drawerItemModifier,
+                                leadingContent = {
+                                    Icon(Icons.Default.Movie, contentDescription = "Фильмы", modifier = Modifier.size(20.dp))
+                                },
+                                colors = drawerItemColors
+                            ) {
+                                Text(text = "Фильмы", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            NavigationDrawerItem(
+                                selected = false,
+                                enabled = isDrawerOpen,
+                                onClick = { onNavigateNavRail("series") },
+                                modifier = drawerItemModifier,
+                                leadingContent = {
+                                    Icon(Icons.Default.Tv, contentDescription = "Сериалы", modifier = Modifier.size(20.dp))
+                                },
+                                colors = drawerItemColors
+                            ) {
+                                Text(text = "Сериалы", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+
+                            NavigationDrawerItem(
+                                selected = false,
+                                enabled = isDrawerOpen,
+                                onClick = { onNavigateNavRail("4k") },
+                                modifier = drawerItemModifier,
+                                leadingContent = {
+                                    Icon(Icons.Default.HighQuality, contentDescription = "4K UHD", modifier = Modifier.size(20.dp))
+                                },
+                                colors = drawerItemColors
+                            ) {
+                                Text(text = "4K UHD", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        NavigationDrawerItem(
+                            selected = false,
+                            enabled = isDrawerOpen,
+                            onClick = { onNavigateNavRail("watchlist") },
+                            modifier = drawerItemModifier,
+                            leadingContent = {
+                                Icon(Icons.Default.Bookmark, contentDescription = "Буду смотреть", modifier = Modifier.size(20.dp))
+                            },
+                            colors = drawerItemColors
+                        ) {
+                            Text(text = "Буду смотреть", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+
+                        NavigationDrawerItem(
+                            selected = false,
+                            enabled = isDrawerOpen,
+                            onClick = { onNavigateNavRail("downloads") },
+                            modifier = drawerItemModifier,
+                            leadingContent = {
+                                Icon(Icons.Default.Download, contentDescription = "Загрузки", modifier = Modifier.size(20.dp))
+                            },
+                            colors = drawerItemColors
+                        ) {
+                            Text(text = "Загрузки", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
 
-                // Navigation Items
+                // Bottom: Switch Profile & Settings Items
                 Column(
                     modifier = Modifier.focusProperties {
                         canFocus = isDrawerOpen
@@ -274,107 +447,33 @@ fun HomeScreen(
                     NavigationDrawerItem(
                         selected = false,
                         enabled = isDrawerOpen,
-                        onClick = { onNavigateNavRail("home") },
-                        modifier = drawerItemModifier.focusRequester(drawerFocusRequester),
+                        onClick = {
+                            scope.launch {
+                                drawerState.setValue(DrawerValue.Closed)
+                            }
+                            onSwitchProfile()
+                        },
+                        modifier = drawerItemModifier,
                         leadingContent = {
-                            Icon(Icons.Default.Home, contentDescription = "Главная", modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Person, contentDescription = "Сменить профиль", modifier = Modifier.size(20.dp))
                         },
                         colors = drawerItemColors
                     ) {
-                        Text(text = "Главная", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Сменить профиль", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     NavigationDrawerItem(
                         selected = false,
                         enabled = isDrawerOpen,
-                        onClick = { onNavigateNavRail("search") },
+                        onClick = { onNavigateNavRail("settings") },
                         modifier = drawerItemModifier,
                         leadingContent = {
-                            Icon(Icons.Default.Search, contentDescription = "Поиск", modifier = Modifier.size(20.dp))
+                            Icon(Icons.Default.Settings, contentDescription = "Настройки", modifier = Modifier.size(20.dp))
                         },
                         colors = drawerItemColors
                     ) {
-                        Text(text = "Поиск", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        Text(text = "Настройки", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
-
-                    NavigationDrawerItem(
-                        selected = false,
-                        enabled = isDrawerOpen,
-                        onClick = { onNavigateNavRail("movies") },
-                        modifier = drawerItemModifier,
-                        leadingContent = {
-                            Icon(Icons.Default.Movie, contentDescription = "Фильмы", modifier = Modifier.size(20.dp))
-                        },
-                        colors = drawerItemColors
-                    ) {
-                        Text(text = "Фильмы", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-
-                    NavigationDrawerItem(
-                        selected = false,
-                        enabled = isDrawerOpen,
-                        onClick = { onNavigateNavRail("series") },
-                        modifier = drawerItemModifier,
-                        leadingContent = {
-                            Icon(Icons.Default.Tv, contentDescription = "Сериалы", modifier = Modifier.size(20.dp))
-                        },
-                        colors = drawerItemColors
-                    ) {
-                        Text(text = "Сериалы", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-
-                    NavigationDrawerItem(
-                        selected = false,
-                        enabled = isDrawerOpen,
-                        onClick = { onNavigateNavRail("4k") },
-                        modifier = drawerItemModifier,
-                        leadingContent = {
-                            Icon(Icons.Default.HighQuality, contentDescription = "4K UHD", modifier = Modifier.size(20.dp))
-                        },
-                        colors = drawerItemColors
-                    ) {
-                        Text(text = "4K UHD", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-
-                    NavigationDrawerItem(
-                        selected = false,
-                        enabled = isDrawerOpen,
-                        onClick = { onNavigateNavRail("watchlist") },
-                        modifier = drawerItemModifier,
-                        leadingContent = {
-                            Icon(Icons.Default.Bookmark, contentDescription = "Буду смотреть", modifier = Modifier.size(20.dp))
-                        },
-                        colors = drawerItemColors
-                    ) {
-                        Text(text = "Буду смотреть", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-
-                    NavigationDrawerItem(
-                        selected = false,
-                        enabled = isDrawerOpen,
-                        onClick = { onNavigateNavRail("downloads") },
-                        modifier = drawerItemModifier,
-                        leadingContent = {
-                            Icon(Icons.Default.Download, contentDescription = "Загрузки", modifier = Modifier.size(20.dp))
-                        },
-                        colors = drawerItemColors
-                    ) {
-                        Text(text = "Загрузки", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-
-                // Settings Item
-                NavigationDrawerItem(
-                    selected = false,
-                    enabled = isDrawerOpen,
-                    onClick = { onNavigateNavRail("settings") },
-                    modifier = drawerItemModifier,
-                    leadingContent = {
-                        Icon(Icons.Default.Settings, contentDescription = "Настройки", modifier = Modifier.size(20.dp))
-                    },
-                    colors = drawerItemColors
-                ) {
-                    Text(text = "Настройки", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         },
@@ -487,6 +586,7 @@ fun HomeScreen(
                     item(key = "hero_carousel") {
                         TvHeroCarousel(
                             items = featuredItems,
+                            isKidsMode = isKidsMode,
                             cardFocusRequesters = cardFocusRequesters,
                             onCardFocused = handleCardFocused,
                             onRequestOpenDrawer = {
@@ -502,81 +602,6 @@ fun HomeScreen(
                     }
                 }
 
-                // Continue Watching Shelf
-                if (continueWatchingItems.isNotEmpty()) {
-                    item(key = "continue_watching_shelf") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusGroup()
-                                .focusRestorer()
-                        ) {
-                            Text(
-                                text = "Продолжить просмотр",
-                                color = TextPrimary,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(start = 36.dp, end = 48.dp)
-                            )
-                            Spacer(modifier = Modifier.height(12.dp))
-                            CompositionLocalProvider(LocalBringIntoViewSpec provides tvHorizontalBringIntoViewSpec) {
-                                val cwRowState = rememberLazyListState()
-                                val (cwLazyRow, cwFirstItem) = remember { FocusRequester.createRefs() }
-                                LazyRow(
-                                    state = cwRowState,
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                    contentPadding = PaddingValues(start = 36.dp, end = 56.dp, top = 12.dp, bottom = 18.dp),
-                                    modifier = Modifier
-                                        .focusRequester(cwLazyRow)
-                                        .focusRestorer { cwFirstItem }
-                                ) {
-                                    itemsIndexed(continueWatchingItems, key = { index, item ->
-                                        val idPart = item.effectiveTconst.ifBlank { item.id.toString() }
-                                        "cw_${idPart}_${item.season}_${item.episode}_$index"
-                                    }) { index, item ->
-                                        val idPart = item.effectiveTconst.ifBlank { item.id.toString() }
-                                        val cardKey = "cw_${idPart}_${item.season}_${item.episode}_$index"
-                                        val requester = cardFocusRequesters.getOrPut(cardKey) { FocusRequester() }
-                                        val itemFocusModifier = if (index == 0) Modifier.focusRequester(cwFirstItem) else Modifier
-                                        TvWideCard(
-                                            title = item.displayTitle,
-                                            subtitle = if (item.season > 0) "Сезон ${item.season} • Серия ${item.episode}" else item.year?.toString(),
-                                            backdropUrl = item.effectiveBackdrop ?: item.effectivePoster,
-                                            progressPercent = item.playbackPercent.toInt(),
-                                            timecode = item.timecodeFormatted,
-                                            isNextUp = item.isNextUp,
-                                            surfaceModifier = Modifier
-                                                .then(itemFocusModifier)
-                                                .focusRequester(requester)
-                                                .onFocusChanged { if (it.isFocused) handleCardFocused(cardKey) }
-                                                .onPreviewKeyEvent { event ->
-                                                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
-                                                        event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_LEFT &&
-                                                        index == 0
-                                                    ) {
-                                                        scope.launch {
-                                                            drawerState.setValue(DrawerValue.Open)
-                                                            drawerFocusRequester.requestFocus()
-                                                        }
-                                                        true
-                                                    } else false
-                                                },
-                                            onClick = {
-                                                cwLazyRow.saveFocusedChild()
-                                                handleCardFocused(cardKey)
-                                                onResumeClick(item)
-                                            },
-                                            onLongClick = {
-                                                selectedActionTarget = CardActionTarget.ContinueWatching(item)
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
                 val openDrawerAction: () -> Unit = {
                     scope.launch {
                         drawerState.setValue(DrawerValue.Open)
@@ -584,104 +609,307 @@ fun HomeScreen(
                     }
                 }
 
-                // Watchlist Shelf ("Буду смотреть")
-                if (watchlistItems.isNotEmpty()) {
-                    item(key = "watchlist_shelf") {
-                        TvMediaShelfRow(
-                            shelfId = "watchlist",
-                            title = "Буду смотреть",
-                            items = watchlistItems,
-                            cardFocusRequesters = cardFocusRequesters,
-                            onCardFocused = handleCardFocused,
-                            onRequestOpenDrawer = openDrawerAction,
-                            onSelectMedia = onSelectMedia,
-                            onOpenShelf = { onNavigateNavRail("watchlist") },
-                            horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
-                            onLongClickMedia = { media ->
-                                selectedActionTarget = CardActionTarget.Watchlist(media)
+                if (homeShelves.isNotEmpty()) {
+                    // Server-Driven UI: Render shelves in exact order provided by backend
+                    homeShelves.forEachIndexed { shelfIndex, shelf ->
+                        when (shelf.id) {
+                            "continue_watching" -> {
+                                val resumeItems = if (continueWatchingItems.isNotEmpty()) {
+                                    continueWatchingItems
+                                } else {
+                                    shelf.items.map { it.toResumeItem() }
+                                }
+                                if (resumeItems.isNotEmpty()) {
+                                    item(key = "continue_watching_shelf") {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .focusGroup()
+                                                .focusRestorer()
+                                        ) {
+                                            Text(
+                                                text = shelf.title.ifBlank { "Продолжить просмотр" },
+                                                color = TextPrimary,
+                                                fontSize = 18.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(start = 36.dp, end = 48.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            CompositionLocalProvider(LocalBringIntoViewSpec provides tvHorizontalBringIntoViewSpec) {
+                                                val cwRowState = rememberLazyListState()
+                                                val (cwLazyRow, cwFirstItem) = remember { FocusRequester.createRefs() }
+                                                LazyRow(
+                                                    state = cwRowState,
+                                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                                    contentPadding = PaddingValues(start = 36.dp, end = 56.dp, top = 12.dp, bottom = 18.dp),
+                                                    modifier = Modifier
+                                                        .focusRequester(cwLazyRow)
+                                                        .focusRestorer { cwFirstItem }
+                                                ) {
+                                                    itemsIndexed(resumeItems, key = { index, item ->
+                                                        val idPart = item.effectiveTconst.ifBlank { item.id.toString() }
+                                                        "cw_${idPart}_${item.season}_${item.episode}_$index"
+                                                    }) { index, item ->
+                                                        val idPart = item.effectiveTconst.ifBlank { item.id.toString() }
+                                                        val cardKey = "cw_${idPart}_${item.season}_${item.episode}_$index"
+                                                        val requester = cardFocusRequesters.getOrPut(cardKey) { FocusRequester() }
+                                                        val itemFocusModifier = if (index == 0) Modifier.focusRequester(cwFirstItem) else Modifier
+                                                        TvWideCard(
+                                                            title = item.displayTitle,
+                                                            subtitle = if (item.season > 0) "Сезон ${item.season} • Серия ${item.episode}" else item.year?.toString(),
+                                                            backdropUrl = item.effectiveBackdrop ?: item.effectivePoster,
+                                                            progressPercent = item.playbackPercent.toInt(),
+                                                            timecode = item.timecodeFormatted,
+                                                            isNextUp = item.isNextUp,
+                                                            surfaceModifier = Modifier
+                                                                .then(itemFocusModifier)
+                                                                .focusRequester(requester)
+                                                                .onFocusChanged { if (it.isFocused) handleCardFocused(cardKey) }
+                                                                .onPreviewKeyEvent { event ->
+                                                                    if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
+                                                                        event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_LEFT &&
+                                                                        index == 0
+                                                                    ) {
+                                                                        openDrawerAction()
+                                                                        true
+                                                                    } else false
+                                                                },
+                                                            onClick = {
+                                                                cwLazyRow.saveFocusedChild()
+                                                                handleCardFocused(cardKey)
+                                                                onResumeClick(item)
+                                                            },
+                                                            onLongClick = {
+                                                                selectedActionTarget = CardActionTarget.ContinueWatching(item)
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                        )
-                    }
-                }
-
-                // Fresh Releases on Trackers
-                if (trackerFreshItems.isNotEmpty()) {
-                    item(key = "tracker_fresh_shelf") {
-                        TvMediaShelfRow(
-                            shelfId = "tracker_fresh",
-                            title = "Новинки на трекерах",
-                            items = trackerFreshItems,
-                            cardFocusRequesters = cardFocusRequesters,
-                            onCardFocused = handleCardFocused,
-                            onRequestOpenDrawer = openDrawerAction,
-                            onSelectMedia = onSelectMedia,
-                            onOpenShelf = { onOpenShelf("tracker_fresh", "Новинки на трекерах") },
-                            horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
-                            onLongClickMedia = { media ->
-                                selectedActionTarget = CardActionTarget.General(media)
+                            "watchlist" -> {
+                                val itemsToRender = if (watchlistItems.isNotEmpty()) {
+                                    watchlistItems
+                                } else {
+                                    shelf.items.map { it.toMediaItem() }
+                                }
+                                if (itemsToRender.isNotEmpty()) {
+                                    item(key = "watchlist_shelf") {
+                                        TvMediaShelfRow(
+                                            shelfId = "watchlist",
+                                            title = shelf.title.ifBlank { "Буду смотреть" },
+                                            items = itemsToRender,
+                                            cardFocusRequesters = cardFocusRequesters,
+                                            onCardFocused = handleCardFocused,
+                                            onRequestOpenDrawer = openDrawerAction,
+                                            onSelectMedia = onSelectMedia,
+                                            onOpenShelf = { onNavigateNavRail("watchlist") },
+                                            horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
+                                            onLongClickMedia = { media ->
+                                                selectedActionTarget = CardActionTarget.Watchlist(media)
+                                            }
+                                        )
+                                    }
+                                }
                             }
-                        )
-                    }
-                }
-
-                // Popular on Trackers (Swarm Hotlist)
-                if (trackerHotlistItems.isNotEmpty()) {
-                    item(key = "tracker_hotlist_shelf") {
-                        TvMediaShelfRow(
-                            shelfId = "tracker_hotlist",
-                            title = "Популярно на трекерах",
-                            items = trackerHotlistItems,
-                            cardFocusRequesters = cardFocusRequesters,
-                            onCardFocused = handleCardFocused,
-                            onRequestOpenDrawer = openDrawerAction,
-                            onSelectMedia = onSelectMedia,
-                            onOpenShelf = { onOpenShelf("tracker_hotlist", "Популярно на трекерах") },
-                            horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
-                            onLongClickMedia = { media ->
-                                selectedActionTarget = CardActionTarget.General(media)
+                            else -> {
+                                val itemsToRender = shelf.items.map { it.toMediaItem() }
+                                if (itemsToRender.isNotEmpty()) {
+                                    item(key = "shelf_${shelf.id}_$shelfIndex") {
+                                        TvMediaShelfRow(
+                                            shelfId = shelf.id,
+                                            title = shelf.title,
+                                            items = itemsToRender,
+                                            cardFocusRequesters = cardFocusRequesters,
+                                            onCardFocused = handleCardFocused,
+                                            onRequestOpenDrawer = openDrawerAction,
+                                            onSelectMedia = onSelectMedia,
+                                            onOpenShelf = { onOpenShelf(shelf.id, shelf.title) },
+                                            horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
+                                            onLongClickMedia = { media ->
+                                                selectedActionTarget = CardActionTarget.General(media)
+                                            }
+                                        )
+                                    }
+                                }
                             }
-                        )
+                        }
                     }
-                }
-
-                // 4K UHD Кинозал
-                if (uhd4kItems.isNotEmpty()) {
-                    item(key = "uhd_4k_shelf") {
-                        TvMediaShelfRow(
-                            shelfId = "uhd_4k",
-                            title = "4K UHD Кинозал",
-                            items = uhd4kItems,
-                            cardFocusRequesters = cardFocusRequesters,
-                            onCardFocused = handleCardFocused,
-                            onRequestOpenDrawer = openDrawerAction,
-                            onSelectMedia = onSelectMedia,
-                            onOpenShelf = { onOpenShelf("uhd_4k", "4K UHD Кинозал") },
-                            horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
-                            onLongClickMedia = { media ->
-                                selectedActionTarget = CardActionTarget.General(media)
+                } else {
+                    // Legacy fallback when homeShelves is empty
+                    if (continueWatchingItems.isNotEmpty()) {
+                        item(key = "continue_watching_shelf") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusGroup()
+                                    .focusRestorer()
+                            ) {
+                                Text(
+                                    text = "Продолжить просмотр",
+                                    color = TextPrimary,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(start = 36.dp, end = 48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                CompositionLocalProvider(LocalBringIntoViewSpec provides tvHorizontalBringIntoViewSpec) {
+                                    val cwRowState = rememberLazyListState()
+                                    val (cwLazyRow, cwFirstItem) = remember { FocusRequester.createRefs() }
+                                    LazyRow(
+                                        state = cwRowState,
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                        contentPadding = PaddingValues(start = 36.dp, end = 56.dp, top = 12.dp, bottom = 18.dp),
+                                        modifier = Modifier
+                                            .focusRequester(cwLazyRow)
+                                            .focusRestorer { cwFirstItem }
+                                    ) {
+                                        itemsIndexed(continueWatchingItems, key = { index, item ->
+                                            val idPart = item.effectiveTconst.ifBlank { item.id.toString() }
+                                            "cw_${idPart}_${item.season}_${item.episode}_$index"
+                                        }) { index, item ->
+                                            val idPart = item.effectiveTconst.ifBlank { item.id.toString() }
+                                            val cardKey = "cw_${idPart}_${item.season}_${item.episode}_$index"
+                                            val requester = cardFocusRequesters.getOrPut(cardKey) { FocusRequester() }
+                                            val itemFocusModifier = if (index == 0) Modifier.focusRequester(cwFirstItem) else Modifier
+                                            TvWideCard(
+                                                title = item.displayTitle,
+                                                subtitle = if (item.season > 0) "Сезон ${item.season} • Серия ${item.episode}" else item.year?.toString(),
+                                                backdropUrl = item.effectiveBackdrop ?: item.effectivePoster,
+                                                progressPercent = item.playbackPercent.toInt(),
+                                                timecode = item.timecodeFormatted,
+                                                isNextUp = item.isNextUp,
+                                                surfaceModifier = Modifier
+                                                    .then(itemFocusModifier)
+                                                    .focusRequester(requester)
+                                                    .onFocusChanged { if (it.isFocused) handleCardFocused(cardKey) }
+                                                    .onPreviewKeyEvent { event ->
+                                                        if (event.nativeKeyEvent.action == KeyEvent.ACTION_DOWN &&
+                                                            event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_LEFT &&
+                                                            index == 0
+                                                        ) {
+                                                            openDrawerAction()
+                                                            true
+                                                        } else false
+                                                    },
+                                                onClick = {
+                                                    cwLazyRow.saveFocusedChild()
+                                                    handleCardFocused(cardKey)
+                                                    onResumeClick(item)
+                                                },
+                                                onLongClick = {
+                                                    selectedActionTarget = CardActionTarget.ContinueWatching(item)
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                        )
+                        }
                     }
-                }
 
-                // Curated Shelves (TMDB Feeds)
-                shelves.forEachIndexed { shelfIndex, shelf ->
-                    if (shelf.items.isNotEmpty()) {
-                        item(key = "shelf_${shelf.id}_$shelfIndex") {
+                    // Watchlist Shelf ("Буду смотреть")
+                    if (watchlistItems.isNotEmpty()) {
+                        item(key = "watchlist_shelf") {
                             TvMediaShelfRow(
-                                shelfId = shelf.id,
-                                title = shelf.title,
-                                items = shelf.items,
+                                shelfId = "watchlist",
+                                title = "Буду смотреть",
+                                items = watchlistItems,
                                 cardFocusRequesters = cardFocusRequesters,
                                 onCardFocused = handleCardFocused,
                                 onRequestOpenDrawer = openDrawerAction,
                                 onSelectMedia = onSelectMedia,
-                                onOpenShelf = { onOpenShelf(shelf.id, shelf.title) },
+                                onOpenShelf = { onNavigateNavRail("watchlist") },
+                                horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
+                                onLongClickMedia = { media ->
+                                    selectedActionTarget = CardActionTarget.Watchlist(media)
+                                }
+                            )
+                        }
+                    }
+
+                    // Fresh Releases on Trackers
+                    if (trackerFreshItems.isNotEmpty()) {
+                        item(key = "tracker_fresh_shelf") {
+                            TvMediaShelfRow(
+                                shelfId = "tracker_fresh",
+                                title = "Новинки на трекерах",
+                                items = trackerFreshItems,
+                                cardFocusRequesters = cardFocusRequesters,
+                                onCardFocused = handleCardFocused,
+                                onRequestOpenDrawer = openDrawerAction,
+                                onSelectMedia = onSelectMedia,
+                                onOpenShelf = { onOpenShelf("tracker_fresh", "Новинки на трекерах") },
                                 horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
                                 onLongClickMedia = { media ->
                                     selectedActionTarget = CardActionTarget.General(media)
                                 }
                             )
+                        }
+                    }
+
+                    // Popular on Trackers (Swarm Hotlist)
+                    if (trackerHotlistItems.isNotEmpty()) {
+                        item(key = "tracker_hotlist_shelf") {
+                            TvMediaShelfRow(
+                                shelfId = "tracker_hotlist",
+                                title = "Популярно на трекерах",
+                                items = trackerHotlistItems,
+                                cardFocusRequesters = cardFocusRequesters,
+                                onCardFocused = handleCardFocused,
+                                onRequestOpenDrawer = openDrawerAction,
+                                onSelectMedia = onSelectMedia,
+                                onOpenShelf = { onOpenShelf("tracker_hotlist", "Популярно на трекерах") },
+                                horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
+                                onLongClickMedia = { media ->
+                                    selectedActionTarget = CardActionTarget.General(media)
+                                }
+                            )
+                        }
+                    }
+
+                    // 4K UHD Кинозал
+                    if (uhd4kItems.isNotEmpty()) {
+                        item(key = "uhd_4k_shelf") {
+                            TvMediaShelfRow(
+                                shelfId = "uhd_4k",
+                                title = "4K UHD Кинозал",
+                                items = uhd4kItems,
+                                cardFocusRequesters = cardFocusRequesters,
+                                onCardFocused = handleCardFocused,
+                                onRequestOpenDrawer = openDrawerAction,
+                                onSelectMedia = onSelectMedia,
+                                onOpenShelf = { onOpenShelf("uhd_4k", "4K UHD Кинозал") },
+                                horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
+                                onLongClickMedia = { media ->
+                                    selectedActionTarget = CardActionTarget.General(media)
+                                }
+                            )
+                        }
+                    }
+
+                    // Curated Shelves (TMDB Feeds)
+                    shelves.forEachIndexed { shelfIndex, shelf ->
+                        if (shelf.items.isNotEmpty()) {
+                            item(key = "shelf_${shelf.id}_$shelfIndex") {
+                                TvMediaShelfRow(
+                                    shelfId = shelf.id,
+                                    title = shelf.title,
+                                    items = shelf.items,
+                                    cardFocusRequesters = cardFocusRequesters,
+                                    onCardFocused = handleCardFocused,
+                                    onRequestOpenDrawer = openDrawerAction,
+                                    onSelectMedia = onSelectMedia,
+                                    onOpenShelf = { onOpenShelf(shelf.id, shelf.title) },
+                                    horizontalBringIntoViewSpec = tvHorizontalBringIntoViewSpec,
+                                    onLongClickMedia = { media ->
+                                        selectedActionTarget = CardActionTarget.General(media)
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -913,6 +1141,7 @@ fun TvMediaShelfRow(
 @Composable
 fun TvHeroCarousel(
     items: List<MediaItem>,
+    isKidsMode: Boolean = false,
     cardFocusRequesters: MutableMap<String, FocusRequester>,
     onCardFocused: (String) -> Unit,
     onRequestOpenDrawer: () -> Unit,
@@ -1030,7 +1259,7 @@ fun TvHeroCarousel(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         TvBadge(
-                            text = "🔥 Тренды недели",
+                            text = if (isKidsMode) "🧸 ДЕТСКИЙ РЕЖИМ (5–8 ЛЕТ)" else "🔥 Тренды недели",
                             backgroundColor = AmberGlow,
                             textColor = AmberUHD
                         )

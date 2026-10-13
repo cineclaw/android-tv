@@ -1,8 +1,12 @@
 package com.cineclaw.tv.feature.player
 
+import android.app.Activity
+import android.content.ContextWrapper
 import android.view.KeyEvent
 import android.view.ViewGroup
+import androidx.compose.ui.platform.LocalContext
 import com.cineclaw.tv.MainActivity
+import com.cineclaw.tv.core.player.AutoFrameRateHelper
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -75,19 +79,49 @@ fun PlayerScreen(
     baseUrl: String = "",
     skipSegments: List<SkipSegment> = emptyList(),
     onSelectQualityRelease: (TorrentRelease) -> Unit,
+    recommendations: List<com.cineclaw.tv.core.model.MediaItem> = emptyList(),
+    onPlayRecommendation: (com.cineclaw.tv.core.model.MediaItem) -> Unit = {},
+    onAddToWatchlist: (com.cineclaw.tv.core.model.MediaItem) -> Unit = {},
     onNextEpisodeClick: () -> Unit = {},
     onSelectEpisode: (season: Int, episode: Int) -> Unit = { _, _ -> },
     onFetchSeasonEpisodes: (season: Int) -> Unit = {},
     onToggleUltraWide: (() -> Unit)? = null,
+    autoFrameRate: Boolean = true,
     onClosePlayer: () -> Unit
 ) {
+    val context = LocalContext.current
+    val activity = remember(context) {
+        var c = context
+        while (c is ContextWrapper) {
+            if (c is Activity) return@remember c
+            c = c.baseContext
+        }
+        null
+    }
+
     val uiState by cinemaPlayer.uiState.collectAsState()
+
+    // Auto Frame Rate (AFR) hardware display mode matching
+    LaunchedEffect(uiState.activeVideoFormat, autoFrameRate, activity) {
+        if (autoFrameRate && activity != null) {
+            AutoFrameRateHelper.applyAutoFrameRate(activity, uiState.activeVideoFormat)
+        }
+    }
+
+    DisposableEffect(activity) {
+        onDispose {
+            if (activity != null) {
+                AutoFrameRateHelper.restoreDefaultDisplayMode(activity)
+            }
+        }
+    }
     var showControls by remember { mutableStateOf(true) }
     var showQualityDialog by remember { mutableStateOf(false) }
     var showTranscodeDialog by remember { mutableStateOf(false) }
     var showAudioDialog by remember { mutableStateOf(false) }
     var showSubtitleDialog by remember { mutableStateOf(false) }
     var showEpisodesDialog by remember { mutableStateOf(false) }
+    var showRecommendationsOverlay by remember { mutableStateOf(false) }
     var isScrubberFocused by remember { mutableStateOf(false) }
     var seekBubbleText by remember { mutableStateOf<String?>(null) }
     var lastInteraction by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -104,9 +138,44 @@ fun PlayerScreen(
         }
     }
 
+    var isPlaybackEnded by remember { mutableStateOf(false) }
+    DisposableEffect(exoPlayer) {
+        val listener = object : androidx.media3.common.Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isPlaybackEnded = (playbackState == androidx.media3.common.Player.STATE_ENDED)
+            }
+        }
+        exoPlayer.addListener(listener)
+        onDispose {
+            exoPlayer.removeListener(listener)
+        }
+    }
+
+    val isMovie = season == null
+    val isMovieFinished by remember(isMovie, activeSkipSegment, skipSegments, uiState.currentPositionSeconds, uiState.durationSeconds, isPlaybackEnded, recommendations) {
+        derivedStateOf {
+            if (!isMovie) return@derivedStateOf false
+            val curPos = uiState.currentPositionSeconds
+            val totalSec = uiState.durationSeconds
+            val hasPassedCredits = skipSegments.any { it.type == "credits" && curPos >= it.startTime }
+            val isInsideCredits = activeSkipSegment?.type == "credits"
+            val isNearEnd = totalSec > 60 && (curPos.toDouble() / totalSec >= 0.90 || totalSec - curPos <= 180)
+            val isEnded = isPlaybackEnded || exoPlayer.playbackState == androidx.media3.common.Player.STATE_ENDED
+            (isInsideCredits || hasPassedCredits || isNearEnd || isEnded) && recommendations.isNotEmpty()
+        }
+    }
+
+    // Auto-reveal recommendations overlay when movie ends
+    LaunchedEffect(isMovie, recommendations.size, isPlaybackEnded) {
+        if (isMovie && recommendations.isNotEmpty() && isPlaybackEnded) {
+            showControls = false
+            showRecommendationsOverlay = true
+        }
+    }
+
     // Autofocus on skip button with TV remote
-    LaunchedEffect(activeSkipSegment) {
-        if (activeSkipSegment != null) {
+    LaunchedEffect(activeSkipSegment, showRecommendationsOverlay) {
+        if (activeSkipSegment != null && !showRecommendationsOverlay) {
             delay(120)
             try {
                 skipButtonFocusRequester.requestFocus()
@@ -114,32 +183,63 @@ fun PlayerScreen(
         }
     }
 
-    // Intercept Back button: dismiss OSD if visible, else exit player
-    BackHandler(enabled = true) {
-        if (showControls) {
+    // Auto-pause video when recommendations overlay is displayed
+    LaunchedEffect(showRecommendationsOverlay) {
+        if (showRecommendationsOverlay) {
             showControls = false
+            try {
+                exoPlayer.pause()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // Intercept Back button: dismiss recommendations or OSD if visible, else trigger recommendations or exit
+    BackHandler(enabled = true) {
+        if (showRecommendationsOverlay) {
+            onClosePlayer()
+        } else if (showControls) {
+            if (isMovieFinished) {
+                showControls = false
+                showRecommendationsOverlay = true
+            } else {
+                showControls = false
+            }
+        } else if (isMovieFinished) {
+            showRecommendationsOverlay = true
         } else {
             onClosePlayer()
         }
     }
 
     // Auto-hide controls timer (15 seconds of inactivity, suspended when paused, scrubbing, or when any dialog is open)
-    LaunchedEffect(showControls, uiState.isPlaying, lastInteraction, showQualityDialog, showAudioDialog, showSubtitleDialog, showEpisodesDialog, isScrubberFocused) {
-        if (showControls && uiState.isPlaying && !showQualityDialog && !showAudioDialog && !showSubtitleDialog && !showEpisodesDialog && !isScrubberFocused) {
+    LaunchedEffect(showControls, uiState.isPlaying, lastInteraction, showQualityDialog, showAudioDialog, showSubtitleDialog, showEpisodesDialog, showRecommendationsOverlay, isScrubberFocused) {
+        if (showControls && uiState.isPlaying && !showQualityDialog && !showAudioDialog && !showSubtitleDialog && !showEpisodesDialog && !showRecommendationsOverlay && !isScrubberFocused) {
             delay(15000)
             showControls = false
         }
     }
 
     // Global hardware key event interceptor (catches TV remote clicks even if Compose focus was lost)
-    DisposableEffect(showControls, isScrubberFocused, showQualityDialog, showAudioDialog, showSubtitleDialog, showEpisodesDialog) {
+    DisposableEffect(showControls, isScrubberFocused, showQualityDialog, showAudioDialog, showSubtitleDialog, showEpisodesDialog, showRecommendationsOverlay, isMovieFinished) {
         val interceptor: (KeyEvent) -> Boolean = { keyEvent ->
             val code = keyEvent.keyCode
             val isDown = keyEvent.action == KeyEvent.ACTION_DOWN
             if (isDown) {
                 lastInteraction = System.currentTimeMillis()
             }
-            if (!showControls) {
+
+            if (showRecommendationsOverlay) {
+                // When recommendations overlay is shown, let Compose handle all DPAD navigation (cards, buttons, carousel).
+                // Only intercept BACK to cleanly close the player.
+                if (code == KeyEvent.KEYCODE_BACK) {
+                    if (isDown) {
+                        onClosePlayer()
+                    }
+                    true
+                } else {
+                    false
+                }
+            } else if (!showControls) {
                 when (code) {
                     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER,
                     KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
@@ -175,7 +275,11 @@ fun PlayerScreen(
                     }
                     KeyEvent.KEYCODE_BACK -> {
                         if (isDown) {
-                            onClosePlayer()
+                            if (isMovieFinished) {
+                                showRecommendationsOverlay = true
+                            } else {
+                                onClosePlayer()
+                            }
                         }
                         true
                     }
@@ -185,7 +289,12 @@ fun PlayerScreen(
                 if (code == KeyEvent.KEYCODE_BACK) {
                     if (!showQualityDialog && !showAudioDialog && !showSubtitleDialog && !showEpisodesDialog) {
                         if (isDown) {
-                            showControls = false
+                            if (isMovieFinished) {
+                                showControls = false
+                                showRecommendationsOverlay = true
+                            } else {
+                                showControls = false
+                            }
                         }
                         true
                     } else false
@@ -202,8 +311,8 @@ fun PlayerScreen(
     }
 
     // Focus management when toggling controls visibility
-    LaunchedEffect(showControls) {
-        if (showControls) {
+    LaunchedEffect(showControls, showRecommendationsOverlay) {
+        if (showControls && !showRecommendationsOverlay) {
             lastInteraction = System.currentTimeMillis()
             delay(50)
             try {
@@ -238,6 +347,10 @@ fun PlayerScreen(
                 )
             }
             .onPreviewKeyEvent { keyEvent ->
+                // Never intercept keys when recommendations overlay or modal dialogs are visible
+                if (showRecommendationsOverlay || showQualityDialog || showAudioDialog || showSubtitleDialog || showEpisodesDialog) {
+                    return@onPreviewKeyEvent false
+                }
                 if (keyEvent.nativeKeyEvent.action == KeyEvent.ACTION_DOWN) {
                     lastInteraction = System.currentTimeMillis()
                     if (!showControls) {
@@ -246,7 +359,11 @@ fun PlayerScreen(
                                 val curSkip = activeSkipSegment
                                 if (curSkip != null) {
                                     if (curSkip.type == "credits") {
-                                        onNextEpisodeClick()
+                                        if (isMovie && recommendations.isNotEmpty()) {
+                                            showRecommendationsOverlay = true
+                                        } else {
+                                            onNextEpisodeClick()
+                                        }
                                     } else {
                                         cinemaPlayer.seekTo(curSkip.endTime)
                                     }
@@ -275,7 +392,11 @@ fun PlayerScreen(
                                 true
                             }
                             KeyEvent.KEYCODE_BACK -> {
-                                onClosePlayer()
+                                if (isMovieFinished) {
+                                    showRecommendationsOverlay = true
+                                } else {
+                                    onClosePlayer()
+                                }
                                 true
                             }
                             else -> false
@@ -872,9 +993,26 @@ fun PlayerScreen(
             )
         }
 
+        // End-of-Movie Recommendations Overlay
+        if (showRecommendationsOverlay) {
+            PlayerRecommendationsOverlay(
+                movieTitle = title,
+                recommendations = recommendations,
+                onPlayRecommendation = { rec ->
+                    showRecommendationsOverlay = false
+                    onPlayRecommendation(rec)
+                },
+                onAddToWatchlist = onAddToWatchlist,
+                onClose = {
+                    showRecommendationsOverlay = false
+                    onClosePlayer()
+                }
+            )
+        }
+
         // Floating "Skip Intro" / "Next Episode" Button with TV Remote Autofocus
         AnimatedVisibility(
-            visible = activeSkipSegment != null && !showQualityDialog && !showAudioDialog && !showSubtitleDialog && !showEpisodesDialog,
+            visible = activeSkipSegment != null && !showQualityDialog && !showAudioDialog && !showSubtitleDialog && !showEpisodesDialog && !showRecommendationsOverlay,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -885,7 +1023,13 @@ fun PlayerScreen(
                 Button(
                     onClick = {
                         if (segment.type == "credits") {
-                            onNextEpisodeClick()
+                            if (season != null) {
+                                onNextEpisodeClick()
+                            } else if (recommendations.isNotEmpty()) {
+                                showRecommendationsOverlay = true
+                            } else {
+                                cinemaPlayer.seekTo(segment.endTime)
+                            }
                         } else {
                             cinemaPlayer.seekTo(segment.endTime)
                         }

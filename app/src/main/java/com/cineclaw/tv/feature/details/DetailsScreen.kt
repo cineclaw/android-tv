@@ -45,12 +45,14 @@ import com.cineclaw.tv.feature.home.CardActionDialog
 fun DetailsScreen(
     media: MediaItem,
     qualityGroups: List<QualityGroup>,
+    metadata: MovieMetadataResponse? = null,
     seasons: List<Int> = emptyList(),
     episodes: List<EpisodeInfo> = emptyList(),
     cast: List<CastMember> = emptyList(),
     crew: List<CrewMember> = emptyList(),
     videos: List<VideoItem> = emptyList(),
     backdrops: List<String> = emptyList(),
+    recommendations: List<MediaItem> = emptyList(),
     criticSummary: CriticSummaryResponse? = null,
     isLoadingCritics: Boolean = false,
     isLoadingMetadata: Boolean = false,
@@ -59,6 +61,7 @@ fun DetailsScreen(
     isRefreshingTorrents: Boolean = false,
     onRefreshTorrents: () -> Unit = {},
     onPersonClick: (Long) -> Unit = {},
+    onRecommendationClick: (MediaItem) -> Unit = {},
     onPlayClick: (Int?, Int?) -> Unit = { _, _ -> },
     onSelectQualityRelease: (TorrentRelease) -> Unit = {},
     onToggleWatchlist: () -> Unit = {},
@@ -73,8 +76,26 @@ fun DetailsScreen(
     var selectedSeason by remember { mutableStateOf(seasons.firstOrNull() ?: 1) }
     var selectedEpisodeForAction by remember { mutableStateOf<EpisodeInfo?>(null) }
     var pendingCatchUpEpisode by remember { mutableStateOf<EpisodeInfo?>(null) }
+
     val scrollState = rememberLazyListState()
     val playButtonFocusRequester = remember { FocusRequester() }
+
+    val playableVideos = remember(videos) {
+        videos
+            .filter { (it.isYouTube || it.isKinopoisk) && (it.key.isNotBlank() || !it.streamUrl.isNullOrBlank()) }
+            .sortedWith(
+                compareByDescending<VideoItem> { it.isKinopoisk }
+                    .thenByDescending {
+                        val n = it.name.lowercase()
+                        n.contains("дублированный") || n.contains("дубляж")
+                    }
+                    .thenByDescending {
+                        val n = it.name.lowercase()
+                        n.contains("трейлер") || it.type.equals("Trailer", ignoreCase = true)
+                    }
+                    .thenByDescending { it.official }
+            )
+    }
 
     fun hasUnwatchedPrior(targetSeason: Int, targetEpisode: Int): Boolean {
         if (seriesProgress == null) return false
@@ -220,11 +241,34 @@ fun DetailsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            if (metadata?.inTheaters == true) {
+                                TvBadge(
+                                    text = "✨ В кинотеатрах",
+                                    backgroundColor = Color(0x33FF5500),
+                                    textColor = Color(0xFFFF7733)
+                                )
+                            }
                             if (media.rating != null && media.rating > 0) {
                                 TvRatingBadge(rating = media.rating)
                             }
+                            if (metadata?.kinopoiskRating != null && metadata.kinopoiskRating > 0) {
+                                TvBadge(
+                                    text = "КП ${String.format(java.util.Locale.US, "%.1f", metadata.kinopoiskRating)}",
+                                    backgroundColor = Color(0x2BFF5500),
+                                    textColor = Color(0xFFFF7733)
+                                )
+                            }
                             if (media.year != null && media.year > 0) {
                                 TvBadge(text = media.year.toString())
+                            }
+                            val premiereDate = formatTvPremiereDate(metadata?.premieredRu ?: metadata?.premiered)
+                            if (!premiereDate.isNullOrBlank()) {
+                                val label = if (!metadata?.premieredRu.isNullOrBlank()) "В РФ: $premiereDate" else "Премьера: $premiereDate"
+                                TvBadge(
+                                    text = label,
+                                    backgroundColor = ObsidianSurface,
+                                    textColor = TextSecondary
+                                )
                             }
                             formatRuntime(media.runtimeMinutes)?.let { rt ->
                                 TvBadge(text = rt)
@@ -288,6 +332,16 @@ fun DetailsScreen(
                                 modifier = Modifier.focusRequester(playButtonFocusRequester),
                                 onClick = { onPlayClick(if (media.isTv) selectedSeason else null, if (media.isTv) 1 else null) }
                             )
+
+                            val primaryTrailer = playableVideos.firstOrNull()
+                            if (primaryTrailer != null) {
+                                TvActionButton(
+                                    text = "Трейлер",
+                                    icon = Icons.Default.Movie,
+                                    isPrimary = false,
+                                    onClick = { selectedTrailer = primaryTrailer }
+                                )
+                            }
 
                             TvActionButton(
                                 text = "Качество",
@@ -514,8 +568,7 @@ fun DetailsScreen(
             }
 
             // Trailers & Videos ("Трейлеры и видео")
-            val youtubeVideos = videos.filter { it.isYouTube && it.key.isNotBlank() }
-            if (youtubeVideos.isNotEmpty()) {
+            if (playableVideos.isNotEmpty()) {
                 item {
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text(
@@ -529,9 +582,10 @@ fun DetailsScreen(
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             contentPadding = PaddingValues(start = 0.dp, end = 32.dp, top = 8.dp, bottom = 8.dp)
                         ) {
-                            items(youtubeVideos) { video ->
+                            items(playableVideos) { video ->
                                 TrailerCard(
                                     video = video,
+                                    fallbackBackdropUrl = media.effectiveBackdrop,
                                     onClick = { selectedTrailer = video }
                                 )
                             }
@@ -629,6 +683,35 @@ fun DetailsScreen(
                                 CrewCard(
                                     member = member,
                                     onClick = { member.id?.let { onPersonClick(it) } }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Recommendations ("Похожие фильмы и рекомендации")
+            if (recommendations.isNotEmpty()) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "Похожие фильмы и рекомендации",
+                            color = TextPrimary,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            contentPadding = PaddingValues(start = 0.dp, end = 32.dp, top = 8.dp, bottom = 8.dp)
+                        ) {
+                            items(recommendations) { rec ->
+                                TvCinemaCard(
+                                    title = rec.displayTitle,
+                                    posterUrl = rec.effectivePoster,
+                                    year = rec.year,
+                                    rating = rec.rating,
+                                    onClick = { onRecommendationClick(rec) }
                                 )
                             }
                         }
@@ -933,6 +1016,7 @@ fun CrewCard(
 @Composable
 fun TrailerCard(
     video: VideoItem,
+    fallbackBackdropUrl: String? = null,
     onClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -953,12 +1037,15 @@ fun TrailerCard(
             .clickable { onClick() }
             .focusable()
     ) {
-        AsyncImage(
-            model = video.thumbnailUrl,
-            contentDescription = video.name,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize()
-        )
+        val effectiveThumbnail = video.thumbnailUrl.ifBlank { fallbackBackdropUrl ?: "" }
+        if (effectiveThumbnail.isNotBlank()) {
+            AsyncImage(
+                model = effectiveThumbnail,
+                contentDescription = video.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Gradient vignette overlay
         Box(
@@ -979,7 +1066,11 @@ fun TrailerCard(
                 .align(Alignment.Center)
                 .size(44.dp)
                 .clip(CircleShape)
-                .background(if (isFocused) EmeraldPrimary else Color(0xDDCC0000))
+                .background(
+                    if (isFocused) EmeraldPrimary
+                    else if (video.isKinopoisk) Color(0xDDFF5500)
+                    else Color(0xDDCC0000)
+                )
                 .border(2.dp, Color.White.copy(alpha = 0.8f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
@@ -991,7 +1082,25 @@ fun TrailerCard(
             )
         }
 
-        // Top Badges (Official / Type)
+        // Top Badges (Kinopoisk / Official / Type)
+        if (video.isKinopoisk) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xCCFF5500))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = "Дубляж • КП",
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
         if (video.official) {
             Box(
                 modifier = Modifier
@@ -1070,5 +1179,25 @@ fun GalleryCard(
                     )
                 )
         )
+    }
+}
+
+private fun formatTvPremiereDate(isoDate: String?): String? {
+    if (isoDate.isNullOrBlank()) return null
+    return try {
+        val parts = isoDate.split("-")
+        if (parts.size >= 3) {
+            val year = parts[0]
+            val month = parts[1].toIntOrNull() ?: return null
+            val day = parts[2].toIntOrNull() ?: return null
+            val months = arrayOf(
+                "янв", "фев", "мар", "апр", "мая", "июн",
+                "июл", "авг", "сен", "окт", "ноя", "дек"
+            )
+            val monthName = months.getOrNull(month - 1) ?: return null
+            "$day $monthName $year"
+        } else isoDate
+    } catch (_: Exception) {
+        isoDate
     }
 }

@@ -54,7 +54,9 @@ fun QualityDialog(
             group.copy(
                 releases = group.releases.sortedWith(
                     compareByDescending<TorrentRelease> { !isHardwareIncompatibleRelease(it) }
+                        .thenBy { it.swarmHealth == "dead" || it.seeds == 0 }
                         .thenByDescending { it.seeds }
+                        .thenByDescending { it.speedPotential ?: 0 }
                         .thenByDescending { it.bitrateMbps }
                         .thenByDescending { it.size }
                 )
@@ -452,13 +454,22 @@ private fun QualityReleaseRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(text = rel.sizeFormatted, color = TextSecondary, fontSize = 11.sp)
-                Text(text = "•", color = TextMuted, fontSize = 11.sp)
+                val isDead = rel.swarmHealth == "dead" || rel.seeds == 0
                 Text(
-                    text = "🌱 ${rel.seeds} сидов",
-                    color = if (rel.seeds > 0) EmeraldPrimary else TextMuted,
+                    text = if (isDead) "❌ 0 сидов (мёртвая)" else "🌱 ${rel.seeds} сидов${if (rel.seedsVerified && rel.seeds > 0) " ✓" else ""}",
+                    color = if (isDead) TextMuted else EmeraldPrimary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
+                if (rel.speedPotential != null && rel.speedPotential > 0) {
+                    Text(text = "•", color = TextMuted, fontSize = 11.sp)
+                    Text(
+                        text = "⚡ ${rel.speedPotential}%",
+                        color = if (rel.speedPotential >= 80) EmeraldPrimary else if (rel.speedPotential >= 50) AmberUHD else TextMuted,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
                 if (!rel.audioLabel.isNullOrBlank()) {
                     Text(text = "•", color = TextMuted, fontSize = 11.sp)
                     Text(text = rel.audioLabel, color = CyanSecondary, fontSize = 11.sp)
