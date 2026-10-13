@@ -34,9 +34,10 @@ import com.cineclaw.tv.core.model.Shelf
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
 fun CatalogScreen(
-    catalogType: String, // "movies", "series", "4k"
+    catalogType: String, // "movies", "series", "4k", "cartoons"
     shelves: List<Shelf>,
     isLoading: Boolean,
+    isKids: Boolean = false,
     onSelectMedia: (MediaItem) -> Unit,
     onOpenShelf: (shelfId: String, title: String) -> Unit,
     onBackClick: () -> Unit
@@ -47,9 +48,13 @@ fun CatalogScreen(
         onBackClick()
     }
 
-    val (title, subtitle) = remember(catalogType) {
+    val (title, subtitle) = remember(catalogType, isKids) {
         when (catalogType) {
-            "series" -> Pair("Сериалы", "Популярные онгоинги, сезоны и стриминговые премьеры")
+            "cartoons" -> Pair("Мультфильмы", "Волшебные миры, сказки и детская анимация")
+            "series" -> Pair(
+                if (isKids) "Мультсериалы" else "Сериалы",
+                if (isKids) "Любимые мультсериалы и анимационные шоу" else "Популярные онгоинги, сезоны и стриминговые премьеры"
+            )
             "4k" -> Pair("4K UHD Кинозал", "Релизы в ультравысоком разрешении 2160p HDR & Dolby Vision")
             else -> Pair("Фильмы", "Каталог полнометражных фильмов, новинок и классики кино")
         }

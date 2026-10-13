@@ -33,12 +33,17 @@ fun SettingsScreen(
     currentServerUrl: String,
     isAudioPassthrough: Boolean,
     preferredQuality: String,
+    isAutoFrameRate: Boolean = true,
     currentUsername: String = "admin",
+    activeProfileName: String = "Основной",
+    isKidsMode: Boolean = false,
     onSaveServerUrl: (String) -> Unit = {},
     onToggleAudioPassthrough: (Boolean) -> Unit = {},
+    onToggleAutoFrameRate: (Boolean) -> Unit = {},
     onSetPreferredQuality: (String) -> Unit = {},
     onLogout: () -> Unit = {},
     onChangeServer: () -> Unit = onLogout,
+    onSwitchProfile: () -> Unit = {},
     onPingCheck: (suspend (String) -> Boolean)? = null
 ) {
     var isServerOnline by remember { mutableStateOf<Boolean?>(null) }
@@ -237,6 +242,56 @@ fun SettingsScreen(
                                     .background(ObsidianBorder)
                             )
 
+                            // Active Profile Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isKidsMode) AmberUHD.copy(alpha = 0.2f) else EmeraldPrimary.copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(if (isKidsMode) "🧸" else "👤", fontSize = 22.sp)
+                                    }
+
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(
+                                            text = "Профиль просмотра",
+                                            color = TextMuted,
+                                            fontSize = 12.sp
+                                        )
+                                        Text(
+                                            text = if (isKidsMode) "$activeProfileName (Детский)" else activeProfileName,
+                                            color = TextPrimary,
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+
+                                TvActionButton(
+                                    text = "Сменить профиль",
+                                    icon = Icons.Default.Person,
+                                    isPrimary = false,
+                                    onClick = onSwitchProfile
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(1.dp)
+                                    .background(ObsidianBorder)
+                            )
+
                             // Actions: Change Server & Logout
                             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                                 TvActionButton(
@@ -302,6 +357,24 @@ fun SettingsScreen(
                         description = "Прямая передача Dolby Digital AC3, E-AC3, TrueHD и DTS на AV-ресивер без преобразования в PCM",
                         isChecked = isAudioPassthrough,
                         onToggle = { onToggleAudioPassthrough(!isAudioPassthrough) }
+                    )
+                }
+            }
+
+            // Section: Video & Auto Frame Rate (AFR)
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Видео & Частота экрана",
+                        color = TextSecondary,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    TvSettingsToggleRow(
+                        title = "Автоподстройка частоты кадров (AFR)",
+                        description = "Автоматическое переключение частоты обновления экрана телевизора (23.976, 24, 50, 60 Гц) под частоту воспроизводимого видео",
+                        isChecked = isAutoFrameRate,
+                        onToggle = { onToggleAutoFrameRate(!isAutoFrameRate) }
                     )
                 }
             }

@@ -87,7 +87,12 @@ data class TorrentRelease(
     @SerialName("stream_url") val streamUrl: String? = null,
     val quality: String = "1080p",
     val hash: String = "",
-    @SerialName("seasons") val seasons: List<Int> = emptyList()
+    @SerialName("seasons") val seasons: List<Int> = emptyList(),
+    @SerialName("real_seeds") val realSeeds: Int? = null,
+    @SerialName("seeds_verified") val seedsVerified: Boolean = false,
+    @SerialName("completed") val completed: Int? = null,
+    @SerialName("swarm_health") val swarmHealth: String? = null,
+    @SerialName("speed_potential") val speedPotential: Int? = null
 ) {
     val effectiveHash: String get() = hash.ifEmpty { infoHash.ifEmpty { id } }
     val sizeFormatted: String get() {
@@ -273,11 +278,25 @@ data class VideoItem(
     val site: String = "YouTube",
     @SerialName("type") val type: String = "Trailer",
     val official: Boolean = false,
-    @SerialName("published_at") val publishedAt: String? = null
+    @SerialName("published_at") val publishedAt: String? = null,
+    @SerialName("stream_url") val streamUrl: String? = null,
+    @SerialName("thumbnail_url") val customThumbnailUrl: String? = null
 ) {
-    val thumbnailUrl: String get() = "https://img.youtube.com/vi/$key/hqdefault.jpg"
+    val thumbnailUrl: String get() {
+        if (!customThumbnailUrl.isNullOrBlank()) return customThumbnailUrl
+        if (isKinopoisk) return ""
+        return "https://img.youtube.com/vi/$key/hqdefault.jpg"
+    }
     val isYouTube: Boolean get() = site.equals("YouTube", ignoreCase = true)
+    val isKinopoisk: Boolean get() = site.equals("Kinopoisk", ignoreCase = true)
 }
+
+@Serializable
+data class TrailerStreamResponse(
+    @SerialName("trailer_id") val trailerId: String = "",
+    @SerialName("stream_url") val streamUrl: String = "",
+    @SerialName("thumbnail_url") val thumbnailUrl: String? = null
+)
 
 @Serializable
 data class MovieMetadataResponse(
@@ -295,7 +314,14 @@ data class MovieMetadataResponse(
     val crew: List<CrewMember> = emptyList(),
     val videos: List<VideoItem> = emptyList(),
     val backdrops: List<String> = emptyList(),
-    @SerialName("runtime_minutes") val runtimeMinutes: Int? = null
+    @SerialName("runtime_minutes") val runtimeMinutes: Int? = null,
+    val recommendations: List<MediaItem> = emptyList(),
+    @SerialName("premiered") val premiered: String? = null,
+    @SerialName("premiered_ru") val premieredRu: String? = null,
+    @SerialName("digital_release") val digitalRelease: String? = null,
+    @SerialName("in_theaters") val inTheaters: Boolean = false,
+    @SerialName("kinopoisk_id") val kinopoiskId: Long? = null,
+    @SerialName("kinopoisk_rating") val kinopoiskRating: Double? = null
 )
 
 @Serializable
@@ -437,7 +463,9 @@ fun groupTorrents(torrents: List<TorrentRelease>): List<QualityGroup> {
     for ((tier, list) in groups) {
         if (list.isNotEmpty()) {
             list.sortWith(
-                compareByDescending<TorrentRelease> { it.seeds }
+                compareBy<TorrentRelease> { it.swarmHealth == "dead" || it.seeds == 0 } // false (alive) before true (dead)
+                    .thenByDescending { it.seeds }
+                    .thenByDescending { it.speedPotential ?: 0 }
                     .thenByDescending { it.bitrateMbps }
                     .thenByDescending { it.size }
             )
@@ -449,6 +477,22 @@ fun groupTorrents(torrents: List<TorrentRelease>): List<QualityGroup> {
 }
 
 @Serializable
+data class UserProfile(
+    val id: String = "",
+    val name: String = "",
+    val icon: String = "adult",
+    @SerialName("is_kids") val isKids: Boolean = false,
+    @SerialName("created_at") val createdAt: String? = null
+)
+
+@Serializable
+data class CreateProfileRequest(
+    val name: String,
+    @SerialName("is_kids") val isKids: Boolean = false,
+    val icon: String = "adult"
+)
+
+@Serializable
 data class WatchProgressRequest(
     @SerialName("imdb_id") val tconst: String,
     val title: String? = null,
@@ -458,7 +502,8 @@ data class WatchProgressRequest(
     @SerialName("position_seconds") val positionSeconds: Double = 0.0,
     @SerialName("duration_seconds") val durationSeconds: Double = 0.0,
     @SerialName("playback_percent") val playbackPercent: Double = 0.0,
-    @SerialName("is_completed") val isCompleted: Boolean = false
+    @SerialName("is_completed") val isCompleted: Boolean = false,
+    val profile: String? = null
 )
 
 @Serializable
@@ -485,7 +530,8 @@ data class WatchlistAddRequest(
     val year: Int? = null,
     val rating: Double? = null,
     @SerialName("poster_path") val posterPath: String? = null,
-    @SerialName("backdrop_path") val backdropPath: String? = null
+    @SerialName("backdrop_path") val backdropPath: String? = null,
+    val profile: String? = null
 )
 
 @Serializable
@@ -658,10 +704,38 @@ data class LoginResponse(
 )
 
 @Serializable
+data class PairInitRequest(
+    val code: String,
+    @SerialName("device_name") val deviceName: String = "Android TV"
+)
+
+@Serializable
+data class PairInitResponse(
+    val success: Boolean = false,
+    val code: String = ""
+)
+
+@Serializable
 data class PairingStatusResponse(
     val paired: Boolean = false,
     val token: String? = null,
     val username: String? = null
+)
+
+@Serializable
+data class HealthResponse(
+    val status: String = "",
+    val service: String = "",
+    val name: String = "",
+    val version: String = ""
+)
+
+@Serializable
+data class DiscoveredServer(
+    val name: String = "CineClaw",
+    val url: String,
+    val version: String? = null,
+    val isOnline: Boolean = true
 )
 
 @Serializable

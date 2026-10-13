@@ -43,6 +43,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import com.cineclaw.tv.CineClawApp
 import com.cineclaw.tv.core.designsystem.*
 import com.cineclaw.tv.core.model.VideoItem
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
@@ -58,16 +64,93 @@ fun TrailerPlayerDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var playerRef by remember { mutableStateOf<YouTubePlayer?>(null) }
+    var ytPlayerRef by remember { mutableStateOf<YouTubePlayer?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
     var isBuffering by remember { mutableStateOf(true) }
     var currentSecond by remember { mutableFloatStateOf(0f) }
     var videoDuration by remember { mutableFloatStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
+    var resolvedStreamUrl by remember { mutableStateOf(video.streamUrl ?: "") }
     var showHud by remember { mutableStateOf(true) }
     var hudInteractionCount by remember { mutableIntStateOf(0) }
     val focusRequester = remember { FocusRequester() }
+
+    // ExoPlayer instance for Kinopoisk HLS playback
+    val exoPlayer = remember(video.isKinopoisk) {
+        if (video.isKinopoisk) {
+            ExoPlayer.Builder(context).build().apply {
+                playWhenReady = true
+            }
+        } else null
+    }
+
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                isBuffering = playbackState == Player.STATE_BUFFERING
+                if (playbackState == Player.STATE_READY) {
+                    val dur = exoPlayer?.duration ?: 0L
+                    if (dur > 0) videoDuration = (dur / 1000f)
+                }
+            }
+
+            override fun onIsPlayingChanged(playing: Boolean) {
+                isPlaying = playing
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                isBuffering = false
+                errorMessage = "Ошибка воспроизведения: ${error.message ?: error.errorCodeName}"
+            }
+        }
+        exoPlayer?.addListener(listener)
+        onDispose {
+            exoPlayer?.removeListener(listener)
+            exoPlayer?.release()
+        }
+    }
+
+    // Kinopoisk stream URL resolution
+    LaunchedEffect(video) {
+        if (video.isKinopoisk && resolvedStreamUrl.isBlank()) {
+            isBuffering = true
+            try {
+                val api = CineClawApp.instance.apiClient.getApi()
+                val resp = api.getTrailerStream(video.key)
+                if (resp.streamUrl.isNotBlank()) {
+                    resolvedStreamUrl = resp.streamUrl
+                } else {
+                    errorMessage = "Не удалось получить поток трейлера Kinopoisk"
+                    isBuffering = false
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("CineClaw", "getTrailerStream failed", e)
+                errorMessage = "Ошибка загрузки трейлера (${e.message ?: "Сеть"})"
+                isBuffering = false
+            }
+        }
+    }
+
+    // Attach stream to ExoPlayer once resolved
+    LaunchedEffect(exoPlayer, resolvedStreamUrl) {
+        if (exoPlayer != null && resolvedStreamUrl.isNotBlank()) {
+            val mediaItem = MediaItem.fromUri(resolvedStreamUrl)
+            exoPlayer.setMediaItem(mediaItem)
+            exoPlayer.prepare()
+            exoPlayer.play()
+        }
+    }
+
+    // Continuous progress tracking for ExoPlayer
+    LaunchedEffect(exoPlayer, isPlaying) {
+        while (exoPlayer != null && isPlaying) {
+            currentSecond = (exoPlayer.currentPosition / 1000f).coerceAtLeast(0f)
+            val dur = exoPlayer.duration
+            if (dur > 0) videoDuration = (dur / 1000f).coerceAtLeast(0f)
+            delay(250)
+        }
+    }
 
     BackHandler {
         onDismiss()
@@ -109,34 +192,51 @@ fun TrailerPlayerDialog(
                         KeyEvent.KEYCODE_ENTER,
                         KeyEvent.KEYCODE_NUMPAD_ENTER,
                         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                            if (isPlaying) {
-                                playerRef?.pause()
+                            if (video.isKinopoisk) {
+                                if (isPlaying) exoPlayer?.pause() else exoPlayer?.play()
                             } else {
-                                playerRef?.play()
+                                if (isPlaying) ytPlayerRef?.pause() else ytPlayerRef?.play()
                             }
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                            playerRef?.play()
+                            if (video.isKinopoisk) exoPlayer?.play() else ytPlayerRef?.play()
                             true
                         }
                         KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                            playerRef?.pause()
+                            if (video.isKinopoisk) exoPlayer?.pause() else ytPlayerRef?.pause()
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_LEFT,
                         KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                            val newTime = (currentSecond - 10f).coerceAtLeast(0f)
-                            playerRef?.seekTo(newTime)
-                            currentSecond = newTime
+                            if (video.isKinopoisk) {
+                                exoPlayer?.let { player ->
+                                    val newPos = (player.currentPosition - 10000L).coerceAtLeast(0L)
+                                    player.seekTo(newPos)
+                                    currentSecond = newPos / 1000f
+                                }
+                            } else {
+                                val newTime = (currentSecond - 10f).coerceAtLeast(0f)
+                                ytPlayerRef?.seekTo(newTime)
+                                currentSecond = newTime
+                            }
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_RIGHT,
                         KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                            val maxTime = if (videoDuration > 0f) videoDuration else Float.MAX_VALUE
-                            val newTime = (currentSecond + 10f).coerceAtMost(maxTime)
-                            playerRef?.seekTo(newTime)
-                            currentSecond = newTime
+                            if (video.isKinopoisk) {
+                                exoPlayer?.let { player ->
+                                    val maxPos = if (player.duration > 0) player.duration else Long.MAX_VALUE
+                                    val newPos = (player.currentPosition + 10000L).coerceAtMost(maxPos)
+                                    player.seekTo(newPos)
+                                    currentSecond = newPos / 1000f
+                                }
+                            } else {
+                                val maxTime = if (videoDuration > 0f) videoDuration else Float.MAX_VALUE
+                                val newTime = (currentSecond + 10f).coerceAtMost(maxTime)
+                                ytPlayerRef?.seekTo(newTime)
+                                currentSecond = newTime
+                            }
                             true
                         }
                         KeyEvent.KEYCODE_DPAD_UP,
@@ -149,102 +249,118 @@ fun TrailerPlayerDialog(
                 } else false
             }
     ) {
-        // Native YouTubePlayerView powered by IFrame API
-        AndroidView(
-            factory = { ctx ->
-                try {
-                    CookieManager.getInstance().setAcceptCookie(true)
-                } catch (_: Exception) {}
-
-                YouTubePlayerView(ctx).apply {
-                    enableAutomaticInitialization = false
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-
-                    fun enableThirdParty(view: View) {
-                        if (view is WebView) {
-                            try {
-                                CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
-                            } catch (_: Exception) {}
-                        } else if (view is ViewGroup) {
-                            for (i in 0 until view.childCount) {
-                                enableThirdParty(view.getChildAt(i))
-                            }
-                        }
+        // Player Surface: ExoPlayer for Kinopoisk HLS, YouTubePlayerView for YouTube
+        if (video.isKinopoisk) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = false
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
                     }
-                    enableThirdParty(this)
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AndroidView(
+                factory = { ctx ->
+                    try {
+                        CookieManager.getInstance().setAcceptCookie(true)
+                    } catch (_: Exception) {}
 
-                    val options = IFramePlayerOptions.Builder(ctx)
-                        .controls(0)
-                        .autoplay(1)
-                        .rel(0)
-                        .ivLoadPolicy(3)
-                        .ccLoadPolicy(0)
-                        .fullscreen(0)
-                        .build()
+                    YouTubePlayerView(ctx).apply {
+                        enableAutomaticInitialization = false
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
 
-                    initialize(
-                        object : AbstractYouTubePlayerListener() {
-                            override fun onReady(youTubePlayer: YouTubePlayer) {
-                                android.util.Log.i("CineClawYT", "YouTubePlayer ready, playing: ${video.key}")
-                                playerRef = youTubePlayer
-                                youTubePlayer.play()
-                            }
-
-                            override fun onStateChange(
-                                youTubePlayer: YouTubePlayer,
-                                state: PlayerConstants.PlayerState
-                            ) {
-                                android.util.Log.i("CineClawYT", "PlayerState: $state")
-                                isPlaying = state == PlayerConstants.PlayerState.PLAYING
-                                isBuffering = state == PlayerConstants.PlayerState.BUFFERING
-                            }
-
-                            override fun onCurrentSecond(
-                                youTubePlayer: YouTubePlayer,
-                                second: Float
-                            ) {
-                                currentSecond = second
-                            }
-
-                            override fun onVideoDuration(
-                                youTubePlayer: YouTubePlayer,
-                                duration: Float
-                            ) {
-                                videoDuration = duration
-                            }
-
-                            override fun onError(
-                                youTubePlayer: YouTubePlayer,
-                                error: PlayerConstants.PlayerError
-                            ) {
-                                android.util.Log.e("CineClawYT", "YouTube error: $error")
-                                isBuffering = false
-                                errorMessage = when (error) {
-                                    PlayerConstants.PlayerError.VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER ->
-                                        "Воспроизведение запрещено правообладателем для встраивания"
-                                    PlayerConstants.PlayerError.VIDEO_NOT_FOUND ->
-                                        "Видео не найдено"
-                                    else ->
-                                        "Ошибка загрузки видео ($error)"
+                        fun enableThirdParty(view: View) {
+                            if (view is WebView) {
+                                try {
+                                    CookieManager.getInstance().setAcceptThirdPartyCookies(view, true)
+                                } catch (_: Exception) {}
+                            } else if (view is ViewGroup) {
+                                for (i in 0 until view.childCount) {
+                                    enableThirdParty(view.getChildAt(i))
                                 }
                             }
-                        },
-                        false,
-                        options,
-                        video.key
-                    )
+                        }
+                        enableThirdParty(this)
+
+                        val options = IFramePlayerOptions.Builder(ctx)
+                            .controls(0)
+                            .autoplay(1)
+                            .rel(0)
+                            .ivLoadPolicy(3)
+                            .ccLoadPolicy(0)
+                            .fullscreen(0)
+                            .build()
+
+                        initialize(
+                            object : AbstractYouTubePlayerListener() {
+                                override fun onReady(youTubePlayer: YouTubePlayer) {
+                                    android.util.Log.i("CineClawYT", "YouTubePlayer ready, playing: ${video.key}")
+                                    ytPlayerRef = youTubePlayer
+                                    youTubePlayer.play()
+                                }
+
+                                override fun onStateChange(
+                                    youTubePlayer: YouTubePlayer,
+                                    state: PlayerConstants.PlayerState
+                                ) {
+                                    android.util.Log.i("CineClawYT", "PlayerState: $state")
+                                    isPlaying = state == PlayerConstants.PlayerState.PLAYING
+                                    isBuffering = state == PlayerConstants.PlayerState.BUFFERING
+                                }
+
+                                override fun onCurrentSecond(
+                                    youTubePlayer: YouTubePlayer,
+                                    second: Float
+                                ) {
+                                    currentSecond = second
+                                }
+
+                                override fun onVideoDuration(
+                                    youTubePlayer: YouTubePlayer,
+                                    duration: Float
+                                ) {
+                                    videoDuration = duration
+                                }
+
+                                override fun onError(
+                                    youTubePlayer: YouTubePlayer,
+                                    error: PlayerConstants.PlayerError
+                                ) {
+                                    android.util.Log.e("CineClawYT", "YouTube error: $error")
+                                    isBuffering = false
+                                    errorMessage = when (error) {
+                                        PlayerConstants.PlayerError.VIDEO_NOT_PLAYABLE_IN_EMBEDDED_PLAYER ->
+                                            "Воспроизведение запрещено правообладателем для встраивания"
+                                        PlayerConstants.PlayerError.VIDEO_NOT_FOUND ->
+                                            "Видео не найдено"
+                                        else ->
+                                            "Ошибка загрузки видео ($error)"
+                                    }
+                                }
+                            },
+                            false,
+                            options,
+                            video.key
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                onRelease = { view ->
+                    try {
+                        view.release()
+                    } catch (_: Exception) {}
                 }
-            },
-            modifier = Modifier.fillMaxSize(),
-            onRelease = { view ->
-                try {
-                    view.release()
-                } catch (_: Exception) {}
-            }
-        )
+            )
+        }
 
         // Buffering indicator
         if (isBuffering && errorMessage == null) {
@@ -255,7 +371,7 @@ fun TrailerPlayerDialog(
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator(
-                    color = EmeraldPrimary,
+                    color = if (video.isKinopoisk) Color(0xFFFF7733) else EmeraldPrimary,
                     strokeWidth = 3.dp,
                     modifier = Modifier.size(48.dp)
                 )
@@ -284,36 +400,38 @@ fun TrailerPlayerDialog(
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        // Open in YouTube app button
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFE50914))
-                                .clickable {
-                                    try {
-                                        val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:${video.key}"))
-                                        context.startActivity(appIntent)
-                                    } catch (_: Exception) {
-                                        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.key}"))
-                                        context.startActivity(webIntent)
+                        // Open in YouTube app button (if YouTube trailer)
+                        if (video.isYouTube) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFFE50914))
+                                    .clickable {
+                                        try {
+                                            val appIntent = Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:${video.key}"))
+                                            context.startActivity(appIntent)
+                                        } catch (_: Exception) {
+                                            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=${video.key}"))
+                                            context.startActivity(webIntent)
+                                        }
                                     }
-                                }
-                                .padding(horizontal = 18.dp, vertical = 10.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.OpenInNew,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = "Открыть в приложении YouTube",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                                    .padding(horizontal = 18.dp, vertical = 10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.OpenInNew,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Открыть в приложении YouTube",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
 
                         // Close button
@@ -367,7 +485,7 @@ fun TrailerPlayerDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        // Left: YouTube badge + Title
+                        // Left: Source badge + Title
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -376,7 +494,7 @@ fun TrailerPlayerDialog(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(6.dp))
-                                    .background(Color(0xFFE50914))
+                                    .background(if (video.isKinopoisk) Color(0xCCFF5500) else Color(0xFFE50914))
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Row(
@@ -390,7 +508,7 @@ fun TrailerPlayerDialog(
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Text(
-                                        text = "YouTube",
+                                        text = if (video.isKinopoisk) "Кинопоиск • Дубляж" else "YouTube",
                                         color = Color.White,
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold
@@ -480,7 +598,7 @@ fun TrailerPlayerDialog(
                                     .fillMaxWidth()
                                     .height(4.dp)
                                     .clip(RoundedCornerShape(2.dp)),
-                                color = EmeraldPrimary,
+                                color = if (video.isKinopoisk) Color(0xFFFF7733) else EmeraldPrimary,
                                 trackColor = Color.White.copy(alpha = 0.2f)
                             )
                             Row(
@@ -544,3 +662,4 @@ private fun formatTime(seconds: Long): String {
     val s = seconds % 60
     return "%02d:%02d".format(m, s)
 }
+

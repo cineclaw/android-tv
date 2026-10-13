@@ -7,20 +7,33 @@ interface CineClawApi {
     @POST("/api/auth/login")
     suspend fun login(@Body req: LoginRequest): LoginResponse
 
+    @GET("/api/profiles")
+    suspend fun getProfiles(): List<UserProfile>
+
+    @POST("/api/profiles")
+    suspend fun createProfile(@Body req: CreateProfileRequest): UserProfile
+
+    @DELETE("/api/profiles/{id}")
+    suspend fun deleteProfile(@Path("id") id: String)
+
     @GET("/api/home")
     suspend fun getHomeFeed(
         @Query("platform") platform: String = "tv",
-        @Query("refresh") refresh: Boolean = false
+        @Query("refresh") refresh: Boolean = false,
+        @Query("profile") profile: String? = null
     ): HomePayload
 
     @GET("/api/feeds")
-    suspend fun getFeeds(): List<Shelf>
+    suspend fun getFeeds(
+        @Query("profile") profile: String? = null
+    ): List<Shelf>
 
     @GET("/api/feeds/{id}")
     suspend fun getShelf(
         @Path("id") id: String,
         @Query("page") page: Int = 1,
-        @Query("type") type: String? = null
+        @Query("type") type: String? = null,
+        @Query("profile") profile: String? = null
     ): Shelf
 
     @GET("/api/catalog/discover")
@@ -42,12 +55,15 @@ interface CineClawApi {
     suspend fun getPersonDetails(@Path("person_id") personId: Long): PersonDetailsResponse
 
     @GET("/api/playback/resume")
-    suspend fun getContinueWatching(): List<ResumeItem>
+    suspend fun getContinueWatching(
+        @Query("profile") profile: String? = null
+    ): List<ResumeItem>
 
     @DELETE("/api/playback/progress")
     suspend fun deleteResumeItem(
         @Query("tconst") tconst: String,
-        @Query("all") all: Boolean = true
+        @Query("all") all: Boolean = true,
+        @Query("profile") profile: String? = null
     )
 
     @GET("/search")
@@ -67,6 +83,12 @@ interface CineClawApi {
 
     @GET("/api/movie/{tconst}/metadata")
     suspend fun getMovieMetadata(@Path("tconst") tconst: String): MovieMetadataResponse
+
+    @GET("/api/trailer/{trailer_id}/stream")
+    suspend fun getTrailerStream(@Path("trailer_id") trailerId: String): TrailerStreamResponse
+
+    @GET("/api/movie/{tconst}/recommendations")
+    suspend fun getMovieRecommendations(@Path("tconst") tconst: String): Shelf
 
     @GET("/api/series/{tconst}/seasons")
     suspend fun getSeriesSeasons(@Path("tconst") tconst: String): SeriesSeasonsResponse
@@ -110,22 +132,36 @@ interface CineClawApi {
     suspend fun setAudioPreference(@Body req: AudioPreferenceRequest)
 
     @GET("/api/playback/series-progress")
-    suspend fun getSeriesProgress(@Query("imdb_id") imdbId: String): SeriesProgressResponse
+    suspend fun getSeriesProgress(
+        @Query("imdb_id") imdbId: String,
+        @Query("profile") profile: String? = null
+    ): SeriesProgressResponse
 
     @POST("/api/playback/mark-watched")
     suspend fun markWatched(@Body req: MarkWatchedRequest)
 
     @GET("/api/watchlist")
-    suspend fun getWatchlist(): List<MediaItem>
+    suspend fun getWatchlist(
+        @Query("profile") profile: String? = null
+    ): List<MediaItem>
 
     @GET("/api/watchlist/check")
-    suspend fun checkWatchlist(@Query("imdb_id") tconst: String): WatchlistCheckResponse
+    suspend fun checkWatchlist(
+        @Query("imdb_id") tconst: String,
+        @Query("profile") profile: String? = null
+    ): WatchlistCheckResponse
 
     @POST("/api/watchlist")
     suspend fun addToWatchlist(@Body item: WatchlistAddRequest)
 
     @DELETE("/api/watchlist")
-    suspend fun removeFromWatchlist(@Query("imdb_id") tconst: String)
+    suspend fun removeFromWatchlist(
+        @Query("imdb_id") tconst: String,
+        @Query("profile") profile: String? = null
+    )
+
+    @POST("/api/auth/pair/init")
+    suspend fun initPairing(@Body req: PairInitRequest): PairInitResponse
 
     @GET("/api/auth/pair/status")
     suspend fun checkPairingStatus(@Query("code") code: String): PairingStatusResponse

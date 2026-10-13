@@ -19,6 +19,7 @@ import com.cineclaw.tv.feature.catalog.CatalogScreen
 import com.cineclaw.tv.feature.details.DetailsScreen
 import com.cineclaw.tv.feature.home.HomeScreen
 import com.cineclaw.tv.feature.home.HomeViewModel
+import com.cineclaw.tv.feature.profile.ProfilePickerScreen
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.Lifecycle
@@ -65,6 +66,9 @@ private data class PendingResumeState(
 
 sealed class Screen(val route: String) {
     object Auth : Screen("auth")
+    object ProfilePicker : Screen("profile_picker?from_drawer={from_drawer}") {
+        fun createRoute(fromDrawer: Boolean = false): String = "profile_picker?from_drawer=$fromDrawer"
+    }
     object Home : Screen("home")
     object Details : Screen("details/{tconst}?id={id}&type={type}&title={title}&poster={poster}&backdrop={backdrop}&overview={overview}&year={year}&rating={rating}") {
         fun createRoute(
@@ -124,21 +128,23 @@ fun AppNavigation(
     val currentServerUrl by app.sessionManager.serverUrl.collectAsState(initial = "http://192.168.88.19:3000")
     val currentUsername by app.sessionManager.username.collectAsState(initial = null)
     val isAudioPassthrough by app.sessionManager.audioPassthrough.collectAsState(initial = false)
+    val isAutoFrameRate by app.sessionManager.autoFrameRate.collectAsState(initial = true)
     val preferredQuality by app.sessionManager.preferredQuality.collectAsState(initial = "4k")
     val serverUrl = currentServerUrl
 
-    val currentToken by app.sessionManager.authToken.collectAsState(initial = null)
-    var hasCheckedAuth by remember { mutableStateOf(false) }
-    var initialIsAuthenticated by remember { mutableStateOf(false) }
+    val initialToken = remember { app.sessionManager.getAuthTokenDirect() }
+    val currentToken by app.sessionManager.authToken.collectAsState(initial = initialToken)
+    var hasCheckedAuth by remember { mutableStateOf(!initialToken.isNullOrBlank()) }
+    var initialIsAuthenticated by remember { mutableStateOf(!initialToken.isNullOrBlank()) }
 
     LaunchedEffect(Unit) {
-        val token = app.sessionManager.authToken.first()
+        val token = app.sessionManager.getAuthTokenDirect() ?: app.sessionManager.authToken.first()
         initialIsAuthenticated = !token.isNullOrBlank()
         hasCheckedAuth = true
     }
 
     LaunchedEffect(hasCheckedAuth, currentToken) {
-        if (hasCheckedAuth && currentToken.isNullOrBlank()) {
+        if (hasCheckedAuth && currentToken.isNullOrBlank() && initialIsAuthenticated) {
             val currentRoute = navController.currentBackStackEntry?.destination?.route
             if (currentRoute != null && currentRoute != Screen.Auth.route) {
                 navController.navigate(Screen.Auth.route) {
@@ -153,7 +159,7 @@ fun AppNavigation(
         return
     }
 
-    val startDestination = if (initialIsAuthenticated) Screen.Home.route else Screen.Auth.route
+    val startDestination = if (initialIsAuthenticated) Screen.ProfilePicker.route else Screen.Auth.route
 
     NavHost(
         navController = navController,
@@ -176,7 +182,7 @@ fun AppNavigation(
                         val (success, errorMsg) = app.apiClient.loginWithResult(username, password, url)
                         isLoggingIn = false
                         if (success) {
-                            navController.navigate(Screen.Home.route) {
+                            navController.navigate(Screen.ProfilePicker.route) {
                                 popUpTo(Screen.Auth.route) { inclusive = true }
                             }
                         } else {
@@ -185,7 +191,7 @@ fun AppNavigation(
                     }
                 },
                 onPairSuccess = {
-                    navController.navigate(Screen.Home.route) {
+                    navController.navigate(Screen.ProfilePicker.route) {
                         popUpTo(Screen.Auth.route) { inclusive = true }
                     }
                 },
@@ -194,9 +200,61 @@ fun AppNavigation(
                 onCheckPing = { url ->
                     app.apiClient.pingServer(url)
                 },
-                onPollPairing = { code ->
-                    val resp = app.apiClient.checkPairingStatus(code)
+                onPollPairing = { code, url ->
+                    val resp = app.apiClient.checkPairingStatus(code, url)
                     resp?.paired == true
+                },
+                onInitPairing = { code, url ->
+                    app.apiClient.initPairing(code, targetUrl = url)
+                },
+                onDiscoverServers = {
+                    com.cineclaw.tv.core.network.ServerDiscovery.discoverServers(
+                        app.apiClient.cleanOkHttpClient,
+                        listOf(currentServerUrl, "http://192.168.88.19:3000", "http://127.0.0.1:3000")
+                    )
+                }
+            )
+        }
+
+        composable(
+            route = Screen.ProfilePicker.route,
+            arguments = listOf(
+                navArgument("from_drawer") { type = NavType.BoolType; defaultValue = false }
+            )
+        ) { backStackEntry ->
+            val fromDrawer = backStackEntry.arguments?.getBoolean("from_drawer") ?: false
+            val activeProfileId = app.sessionManager.getActiveProfileDirect()
+
+            ProfilePickerScreen(
+                currentActiveProfileId = activeProfileId,
+                fromDrawer = fromDrawer,
+                onSelectProfile = { profile ->
+                    scope.launch {
+                        app.sessionManager.setActiveProfile(profile.id, profile.name, profile.isKids)
+                        if (fromDrawer) {
+                            navController.navigate(Screen.Home.route) {
+                                popUpTo(Screen.Home.route) { inclusive = true }
+                            }
+                        } else {
+                            navController.navigate(Screen.Home.route) {
+                                popUpTo(Screen.ProfilePicker.route) { inclusive = true }
+                            }
+                        }
+                    }
+                },
+                onNavigateToAuth = {
+                    navController.navigate(Screen.Auth.route) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                },
+                onBackClick = {
+                    if (fromDrawer) {
+                        navController.popBackStack()
+                    } else {
+                        navController.navigate(Screen.Auth.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
                 }
             )
         }
@@ -204,8 +262,10 @@ fun AppNavigation(
         composable(Screen.Home.route) {
             val homeViewModel: HomeViewModel = viewModel()
 
-            LaunchedEffect(Unit) {
-                homeViewModel.loadData(app)
+            val activeProfileId = app.sessionManager.getActiveProfileDirect()
+
+            LaunchedEffect(activeProfileId) {
+                homeViewModel.loadData(app, forceRefresh = true)
             }
 
             LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
@@ -220,11 +280,17 @@ fun AppNavigation(
                 trackerHotlistItems = homeViewModel.trackerHotlist,
                 uhd4kItems = homeViewModel.uhd4k,
                 shelves = homeViewModel.shelves,
+                homeShelves = homeViewModel.homeShelves,
                 isLoading = homeViewModel.isLoading,
                 errorMessage = homeViewModel.errorMessage,
                 lastFocusedCardKey = homeViewModel.lastFocusedCardKey,
                 onCardFocused = { homeViewModel.lastFocusedCardKey = it },
                 onRetry = { homeViewModel.loadData(app, forceRefresh = true) },
+                activeProfileName = app.sessionManager.getActiveProfileNameDirect(),
+                isKidsMode = app.sessionManager.isKidsModeDirect(),
+                onSwitchProfile = {
+                    navController.navigate(Screen.ProfilePicker.createRoute(fromDrawer = true))
+                },
                 onSelectMedia = { media ->
                     navController.navigate(
                         Screen.Details.createRoute(
@@ -270,9 +336,11 @@ fun AppNavigation(
                         "settings" -> navController.navigate(Screen.Settings.route)
                         "movies" -> navController.navigate(Screen.Catalog.createRoute("movies"))
                         "series" -> navController.navigate(Screen.Catalog.createRoute("series"))
+                        "cartoons" -> navController.navigate(Screen.Catalog.createRoute("cartoons"))
                         "4k" -> navController.navigate(Screen.Catalog.createRoute("4k"))
                         "watchlist" -> navController.navigate(Screen.Watchlist.route)
                         "downloads" -> navController.navigate(Screen.Downloads.route)
+                        "profile" -> navController.navigate(Screen.ProfilePicker.createRoute(fromDrawer = true))
                     }
                 },
                 onDeleteResumeItem = { resume ->
@@ -342,6 +410,8 @@ fun AppNavigation(
             var crew by remember { mutableStateOf<List<CrewMember>>(emptyList()) }
             var videos by remember { mutableStateOf<List<VideoItem>>(emptyList()) }
             var backdrops by remember { mutableStateOf<List<String>>(emptyList()) }
+            var recommendations by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+            var movieMetadata by remember { mutableStateOf<MovieMetadataResponse?>(null) }
             var criticSummary by remember { mutableStateOf<CriticSummaryResponse?>(null) }
             var isLoadingCritics by remember { mutableStateOf(false) }
             var isLoadingMetadata by remember { mutableStateOf(true) }
@@ -405,10 +475,12 @@ fun AppNavigation(
                         // 1. Metadata
                         try {
                             val meta = api.getMovieMetadata(realTconst)
+                            movieMetadata = meta
                             cast = meta.cast
                             crew = meta.crew
                             videos = meta.videos
                             backdrops = meta.backdrops
+                            recommendations = meta.recommendations
                             media = media.copy(
                                 title = meta.title.ifEmpty { media.title },
                                 ruTitle = meta.title.ifEmpty { media.ruTitle },
@@ -420,7 +492,9 @@ fun AppNavigation(
                                 genres = meta.genres.ifEmpty { media.genres },
                                 runtimeMinutes = meta.runtimeMinutes ?: media.runtimeMinutes
                             )
-                        } catch (e: Exception) {}
+                        } catch (e: Exception) {
+                            android.util.Log.e("CineClaw", "getMovieMetadata failed for $realTconst", e)
+                        }
 
                         // 1.1 AI Critics Consensus
                         launch {
@@ -475,12 +549,14 @@ fun AppNavigation(
             DetailsScreen(
                 media = media,
                 qualityGroups = qualityGroups,
+                metadata = movieMetadata,
                 seasons = seasons,
                 episodes = episodes,
                 cast = cast,
                 crew = crew,
                 videos = videos,
                 backdrops = backdrops,
+                recommendations = recommendations,
                 criticSummary = criticSummary,
                 isLoadingCritics = isLoadingCritics,
                 isLoadingMetadata = isLoadingMetadata,
@@ -490,6 +566,21 @@ fun AppNavigation(
                 onRefreshTorrents = onRefreshTorrents,
                 onPersonClick = { personId ->
                     navController.navigate(Screen.Person.createRoute(personId))
+                },
+                onRecommendationClick = { recItem ->
+                    navController.navigate(
+                        Screen.Details.createRoute(
+                            tconst = recItem.effectiveTconst,
+                            id = recItem.effectiveId,
+                            type = recItem.mediaType ?: if (recItem.isTv) "tv" else "movie",
+                            title = recItem.displayTitle,
+                            poster = recItem.posterPath ?: recItem.posterUrl,
+                            backdrop = recItem.backdropPath ?: recItem.backdropUrl,
+                            overview = recItem.overview,
+                            year = recItem.year,
+                            rating = recItem.rating
+                        )
+                    )
                 },
                 onSelectSeason = { sNum ->
                     scope.launch {
@@ -672,12 +763,13 @@ fun AppNavigation(
                 else -> "1080p"
             }
 
-            val cinemaPlayer = remember(tconst, isAudioPassthrough) {
+            val cinemaPlayer = remember(tconst, isAudioPassthrough, isAutoFrameRate) {
                 CinemaPlayer(
                     context = context,
                     apiClient = app.apiClient,
                     initialQualityTier = initialQuality,
-                    audioPassthrough = isAudioPassthrough
+                    audioPassthrough = isAudioPassthrough,
+                    autoFrameRate = isAutoFrameRate
                 )
             }
             var qualityGroups by remember { mutableStateOf<List<QualityGroup>>(emptyList()) }
@@ -686,6 +778,7 @@ fun AppNavigation(
             var episodesList by remember { mutableStateOf<List<EpisodeInfo>>(emptyList()) }
             var activePlayerInfo by remember { mutableStateOf<PlayerInfoResponse?>(null) }
             var activeStreamUrl by remember { mutableStateOf<String?>(null) }
+            var movieRecommendations by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
 
             LaunchedEffect(tconst, seasonArg, episodeArg) {
                 // Check local offline downloads first for instant 100% offline playback
@@ -720,6 +813,15 @@ fun AppNavigation(
                             episodesList = api.getSeriesEpisodes(tconst, seasonArg)
                         } catch (e: Exception) {
                             android.util.Log.w("CineClaw", "Failed to fetch seasons/episodes for player: ${e.message}")
+                        }
+                    } else if (tconst.isNotBlank()) {
+                        launch {
+                            try {
+                                val shelf = api.getMovieRecommendations(tconst)
+                                movieRecommendations = shelf.items
+                            } catch (e: Exception) {
+                                android.util.Log.w("CineClaw", "Failed to fetch recommendations for player: ${e.message}")
+                            }
                         }
                     }
 
@@ -944,6 +1046,45 @@ fun AppNavigation(
                     directStreamUrl = activeStreamUrl,
                     baseUrl = serverUrl,
                     skipSegments = activePlayerInfo?.skipSegments ?: emptyList(),
+                    recommendations = movieRecommendations,
+                    onPlayRecommendation = { recItem ->
+                        cinemaPlayer.release()
+                        navController.navigate(
+                            Screen.Details.createRoute(
+                                tconst = recItem.effectiveTconst,
+                                id = recItem.effectiveId,
+                                type = recItem.mediaType ?: if (recItem.isTv) "tv" else "movie",
+                                title = recItem.displayTitle,
+                                poster = recItem.posterPath ?: recItem.posterUrl,
+                                backdrop = recItem.backdropPath ?: recItem.backdropUrl,
+                                overview = recItem.overview,
+                                year = recItem.year,
+                                rating = recItem.rating
+                            )
+                        ) {
+                            popUpTo(Screen.Player.route) { inclusive = true }
+                        }
+                    },
+                    onAddToWatchlist = { recItem ->
+                        scope.launch {
+                            try {
+                                val api = app.apiClient.getApi()
+                                val req = WatchlistAddRequest(
+                                    imdbId = recItem.effectiveTconst,
+                                    mediaType = recItem.mediaType ?: if (recItem.isTv) "tv" else "movie",
+                                    title = recItem.displayTitle,
+                                    originalTitle = recItem.originalTitle,
+                                    year = recItem.year,
+                                    rating = recItem.rating,
+                                    posterPath = recItem.posterUrl ?: recItem.posterPath,
+                                    backdropPath = recItem.backdropUrl ?: recItem.backdropPath
+                                )
+                                api.addToWatchlist(req)
+                            } catch (e: Exception) {
+                                android.util.Log.e("CineClaw", "addToWatchlist failed", e)
+                            }
+                        }
+                    },
                     onSelectQualityRelease = { release ->
                         scope.launch {
                             try {
@@ -1032,6 +1173,7 @@ fun AppNavigation(
                             }
                         }
                     },
+                    autoFrameRate = isAutoFrameRate,
                     onClosePlayer = { navController.popBackStack() }
                 )
             }
@@ -1124,8 +1266,14 @@ fun AppNavigation(
             SettingsScreen(
                 currentServerUrl = currentServerUrl,
                 currentUsername = currentUsername ?: "admin",
+                activeProfileName = app.sessionManager.getActiveProfileNameDirect(),
+                isKidsMode = app.sessionManager.isKidsModeDirect(),
                 isAudioPassthrough = isAudioPassthrough,
                 preferredQuality = preferredQuality,
+                isAutoFrameRate = isAutoFrameRate,
+                onSwitchProfile = {
+                    navController.navigate(Screen.ProfilePicker.createRoute(fromDrawer = true))
+                },
                 onSaveServerUrl = { newUrl ->
                     scope.launch {
                         app.sessionManager.saveServerUrl(newUrl)
@@ -1134,6 +1282,11 @@ fun AppNavigation(
                 onToggleAudioPassthrough = { enabled ->
                     scope.launch {
                         app.sessionManager.setAudioPassthrough(enabled)
+                    }
+                },
+                onToggleAutoFrameRate = { enabled ->
+                    scope.launch {
+                        app.sessionManager.setAutoFrameRate(enabled)
                     }
                 },
                 onSetPreferredQuality = { quality ->
@@ -1229,9 +1382,10 @@ fun AppNavigation(
                 isLoading = true
                 try {
                     val api = app.apiClient.getApi()
+                    val isKids = app.sessionManager.isKidsModeDirect()
                     val newItems = when (shelfId) {
-                        "tracker_fresh" -> api.getHotlist(type = "new_movie", page = p).items
-                        "tracker_hotlist" -> api.getHotlist(type = "movie", page = p).items
+                        "tracker_fresh" -> api.getHotlist(type = if (isKids) "new_kids" else "new_movie", page = p).items
+                        "tracker_hotlist" -> api.getHotlist(type = if (isKids) "kids_popular" else "movie", page = p).items
                         "uhd_4k", "uhd_movie" -> api.getHotlist(type = "movie", quality = "4k", page = p).items
                         "uhd_fresh" -> api.getHotlist(type = "new_movie", quality = "4k", page = p).items
                         "tracker_fresh_tv" -> api.getHotlist(type = "new_tv", page = p).items
@@ -1293,14 +1447,29 @@ fun AppNavigation(
                 isLoading = true
                 try {
                     val api = app.apiClient.getApi()
+                    val isKids = app.sessionManager.isKidsModeDirect()
                     catalogShelves = when (catalogType) {
                         "series" -> {
-                            val popSeries = api.getShelf(id = "popular_series", type = "tv")
-                            val freshTv = api.getHotlist(type = "new_tv").let { Shelf(id = "tracker_fresh_tv", title = "Новинки сериалов на трекерах", items = it.items) }
-                            val appleTv = api.getShelf(id = "apple_tv", type = "tv")
-                            val hboMax = api.getShelf(id = "hbo_max", type = "tv")
-                            val swarmTv = api.getHotlist(type = "tv").let { Shelf(id = "tracker_tv", title = "Популярно на трекерах (Сериалы)", items = it.items) }
-                            listOf(popSeries, freshTv, appleTv, hboMax, swarmTv).filter { it.items.isNotEmpty() }
+                            if (isKids) {
+                                val kidsSeries = api.getShelf(id = "kids_series", type = "tv")
+                                listOf(kidsSeries).filter { it.items.isNotEmpty() }
+                            } else {
+                                val popSeries = api.getShelf(id = "popular_series", type = "tv")
+                                val freshTv = api.getHotlist(type = "new_tv").let { Shelf(id = "tracker_fresh_tv", title = "Новинки сериалов на трекерах", items = it.items) }
+                                val appleTv = api.getShelf(id = "apple_tv", type = "tv")
+                                val hboMax = api.getShelf(id = "hbo_max", type = "tv")
+                                val swarmTv = api.getHotlist(type = "tv").let { Shelf(id = "tracker_tv", title = "Популярно на трекерах (Сериалы)", items = it.items) }
+                                listOf(popSeries, freshTv, appleTv, hboMax, swarmTv).filter { it.items.isNotEmpty() }
+                            }
+                        }
+                        "cartoons" -> {
+                            val hotlist = api.getHotlist(type = "kids_popular").let { Shelf(id = "tracker_hotlist", title = "Популярно на трекерах", items = it.items) }
+                            val magic = api.getShelf(id = "kids_magic", type = "movie")
+                            val family = api.getShelf(id = "kids_family", type = "movie")
+                            val russian = api.getShelf(id = "kids_russian", type = "movie")
+                            val action = api.getShelf(id = "kids_action", type = "movie")
+                            val fresh = api.getHotlist(type = "new_kids").let { Shelf(id = "tracker_fresh", title = "Новинки на трекерах для детей", items = it.items) }
+                            listOf(hotlist, magic, family, russian, action, fresh).filter { it.items.isNotEmpty() }
                         }
                         "4k" -> {
                             val uhdMovie = api.getHotlist(type = "movie", quality = "4k").let { Shelf(id = "uhd_movie", title = "4K UHD Фильмы", items = it.items) }
@@ -1323,6 +1492,7 @@ fun AppNavigation(
                 catalogType = catalogType,
                 shelves = catalogShelves,
                 isLoading = isLoading,
+                isKids = app.sessionManager.isKidsModeDirect(),
                 onSelectMedia = { media ->
                     navController.navigate(
                         Screen.Details.createRoute(
@@ -1339,7 +1509,7 @@ fun AppNavigation(
                     )
                 },
                 onOpenShelf = { shelfId, title ->
-                    navController.navigate(Screen.Shelf.createRoute(shelfId, title, type = if (catalogType == "series") "tv" else "movie"))
+                    navController.navigate(Screen.Shelf.createRoute(shelfId, title, type = if (catalogType == "series" || shelfId == "kids_series") "tv" else "movie"))
                 },
                 onBackClick = { navController.popBackStack() }
             )
@@ -1462,8 +1632,10 @@ fun selectBestReleaseForQuality(
         val group = qualityGroups.firstOrNull { it.tier.equals(tier, ignoreCase = true) } ?: continue
         val matching = group.releases.filter { !isHardwareIncompatible(it) && seasonMatchScore(it, targetSeason) >= 10 }
         val candidate = matching.maxWithOrNull(
-            compareBy<TorrentRelease> { seasonMatchScore(it, targetSeason) }
+            compareBy<TorrentRelease> { it.swarmHealth != "dead" && it.seeds > 0 }
+                .thenBy { seasonMatchScore(it, targetSeason) }
                 .thenBy { it.seeds }
+                .thenBy { it.speedPotential ?: 0 }
                 .thenBy { it.size }
         )
         if (candidate != null) return candidate
@@ -1474,7 +1646,12 @@ fun selectBestReleaseForQuality(
         val group = qualityGroups.firstOrNull { it.tier.equals(tier, ignoreCase = true) } ?: continue
         val candidate = group.releases
             .filter { !isHardwareIncompatible(it) && seasonMatchScore(it, targetSeason) >= 0 }
-            .maxWithOrNull(compareBy<TorrentRelease> { it.seeds }.thenBy { it.size })
+            .maxWithOrNull(
+                compareBy<TorrentRelease> { it.swarmHealth != "dead" && it.seeds > 0 }
+                    .thenBy { it.seeds }
+                    .thenBy { it.speedPotential ?: 0 }
+                    .thenBy { it.size }
+            )
         if (candidate != null) return candidate
     }
 
@@ -1483,17 +1660,29 @@ fun selectBestReleaseForQuality(
         val group = qualityGroups.firstOrNull { it.tier.equals(tier, ignoreCase = true) } ?: continue
         val candidate = group.releases
             .filter { !isHardwareIncompatible(it) }
-            .maxWithOrNull(compareBy<TorrentRelease> { it.seeds }.thenBy { it.size })
+            .maxWithOrNull(
+                compareBy<TorrentRelease> { it.swarmHealth != "dead" && it.seeds > 0 }
+                    .thenBy { it.seeds }
+                    .thenBy { it.speedPotential ?: 0 }
+                    .thenBy { it.size }
+            )
         if (candidate != null) return candidate
     }
 
     // Pass 4: fallback across all tiers, excluding hardware-incompatible
     val compatFallback = qualityGroups.flatMap { it.releases }
         .filter { !isHardwareIncompatible(it) }
-        .maxByOrNull { it.seeds }
+        .maxWithOrNull(
+            compareBy<TorrentRelease> { it.swarmHealth != "dead" && it.seeds > 0 }
+                .thenBy { it.seeds }
+                .thenBy { it.speedPotential ?: 0 }
+        )
     if (compatFallback != null) return compatFallback
 
     // Absolute emergency fallback
-    return qualityGroups.flatMap { it.releases }.maxByOrNull { it.seeds }
+    return qualityGroups.flatMap { it.releases }.maxWithOrNull(
+        compareBy<TorrentRelease> { it.swarmHealth != "dead" && it.seeds > 0 }
+            .thenBy { it.seeds }
+    )
 }
 

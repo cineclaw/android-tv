@@ -61,7 +61,8 @@ data class PlayerUiState(
     val showNextEpisodeBanner: Boolean = false,
     val countdownNextEpisode: Int = 10,
     val errorMessage: String? = null,
-    val streamStats: com.cineclaw.tv.core.model.StreamStats? = null
+    val streamStats: com.cineclaw.tv.core.model.StreamStats? = null,
+    val activeVideoFormat: Format? = null
 )
 
 @OptIn(UnstableApi::class)
@@ -69,7 +70,8 @@ class CinemaPlayer(
     private val context: Context,
     private val apiClient: ApiClient,
     initialQualityTier: String = "1080p",
-    private val audioPassthrough: Boolean = false
+    private val audioPassthrough: Boolean = false,
+    private val autoFrameRate: Boolean = true
 ) {
     val exoPlayer: ExoPlayer
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -162,7 +164,7 @@ class CinemaPlayer(
             setEnableDecoderFallback(true)
         }
 
-        val okHttpClient = apiClient.getDirectOkHttpClient()
+        val okHttpClient = apiClient.streamingOkHttpClient
         val dataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
         val extractorsFactory = ResilientExtractorsFactory()
         val mediaSourceFactory = DefaultMediaSourceFactory(context, extractorsFactory)
@@ -175,8 +177,22 @@ class CinemaPlayer(
             .setLoadControl(loadControl)
             .setSeekParameters(SeekParameters.CLOSEST_SYNC)
             .build()
+            .apply {
+                videoChangeFrameRateStrategy = if (autoFrameRate) {
+                    C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS
+                } else {
+                    C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF
+                }
+            }
 
         exoPlayer.addListener(object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                val currentFormat = exoPlayer.videoFormat
+                if (currentFormat != null && currentFormat != _uiState.value.activeVideoFormat) {
+                    _uiState.value = _uiState.value.copy(activeVideoFormat = currentFormat)
+                }
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
                 when (playbackState) {
                     Player.STATE_BUFFERING -> {
@@ -219,8 +235,17 @@ class CinemaPlayer(
                 val parsedSubs = mutableListOf<SubtitleTrack>()
                 var subIdx = 0
                 var activeSubIdx = -1
+                var activeVideoFormat: Format? = null
 
                 for (group in tracks.groups) {
+                    if (group.type == C.TRACK_TYPE_VIDEO && group.isSelected) {
+                        for (i in 0 until group.length) {
+                            if (group.isTrackSelected(i)) {
+                                activeVideoFormat = group.getTrackFormat(i)
+                                break
+                            }
+                        }
+                    }
                     if (group.type == C.TRACK_TYPE_AUDIO) {
                         for (i in 0 until group.length) {
                             val format = group.getTrackFormat(i)
@@ -352,7 +377,8 @@ class CinemaPlayer(
                     audioTracks = if (parsedAudio.isNotEmpty()) parsedAudio else _uiState.value.audioTracks,
                     selectedAudioIndex = if (activeAudioIdx >= 0) activeAudioIdx else _uiState.value.selectedAudioIndex,
                     subtitleTracks = if (parsedSubs.isNotEmpty()) parsedSubs else _uiState.value.subtitleTracks,
-                    selectedSubtitleIndex = if (activeSubIdx >= 0) activeSubIdx else _uiState.value.selectedSubtitleIndex
+                    selectedSubtitleIndex = if (activeSubIdx >= 0) activeSubIdx else _uiState.value.selectedSubtitleIndex,
+                    activeVideoFormat = activeVideoFormat ?: exoPlayer.videoFormat ?: _uiState.value.activeVideoFormat
                 )
 
                 val defaultServerTrack = initialServerAudioTracks.firstOrNull { it.isDefault }
